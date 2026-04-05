@@ -1,0 +1,19 @@
+{
+  "name": "mcp-multi-model",
+  "version": "3.0.0",
+  "description": "MCP server for parallel multi-model AI queries (DeepSeek, Gemini, Kimi, and more)",
+  "main": "index.js",
+  "scripts": {
+    "setup": "node setup.js",
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "js-yaml": "^4.1.1",
+    "zod": "^4.3.6"
+  },
+  "type": "module"
+}
