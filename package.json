@@ -22,15 +22,15 @@
     "claude-code",
     "model-context-protocol"
   ],
-  "author": "gaoyingze",
+  "author": "K1vin1906",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gaoyingze/mcp-multi-model.git"
+    "url": "git+https://github.com/K1vin1906/mcp-multi-model.git"
   },
-  "homepage": "https://github.com/gaoyingze/mcp-multi-model",
+  "homepage": "https://github.com/K1vin1906/mcp-multi-model",
   "bugs": {
-    "url": "https://github.com/gaoyingze/mcp-multi-model/issues"
+    "url": "https://github.com/K1vin1906/mcp-multi-model/issues"
   },
   "files": [
     "index.js",

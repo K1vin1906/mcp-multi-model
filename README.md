@@ -12,7 +12,7 @@ An MCP server that lets Claude Code query multiple AI models (DeepSeek, Gemini, 
 - **Cost tracking** — Per-call token usage and cost estimation based on model pricing
 - **Auto-retry** — Exponential backoff on 429/5xx errors and network failures
 - **YAML config** — Add new models by editing `config.yaml`, no code changes needed
-- **Real-time monitoring** — Optional [Agent Monitor](https://github.com/gaoyingze/agent-monitor) TUI dashboard via Unix socket
+- **Real-time monitoring** — Optional [Agent Monitor](https://github.com/K1vin1906/agent-monitor) TUI dashboard via Unix socket
 
 ## Supported Models
 
@@ -50,7 +50,7 @@ No install needed. Add to your Claude Code MCP config:
 ### Option 2: Clone and run locally
 
 ```bash
-git clone https://github.com/gaoyingze/mcp-multi-model.git
+git clone https://github.com/K1vin1906/mcp-multi-model.git
 cd mcp-multi-model
 npm install
 npm run setup   # Interactive setup wizard — validates your API keys
@@ -177,7 +177,7 @@ Translate this paragraph to English, technical style
 
 A companion TUI dashboard that shows real-time model activity, streaming output, token usage, and cost tracking.
 
-See [agent-monitor](https://github.com/gaoyingze/agent-monitor) for setup instructions.
+See [agent-monitor](https://github.com/K1vin1906/agent-monitor) for setup instructions.
 
 ## License
 
