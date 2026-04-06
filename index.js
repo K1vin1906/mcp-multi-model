@@ -20,10 +20,14 @@ try {
 } catch {}
 
 // ── 加载配置 ──
-const configPath = join(__dirname, "config.yaml");
+let configPath = join(__dirname, "config.yaml");
 if (!existsSync(configPath)) {
-  console.error("❌ config.yaml not found. Copy config.example.yaml and configure your API keys.");
-  process.exit(1);
+  configPath = join(__dirname, "config.example.yaml");
+  if (!existsSync(configPath)) {
+    console.error("❌ config.yaml not found. Copy config.example.yaml and configure your API keys.");
+    process.exit(1);
+  }
+  console.error("ℹ  Using default config (config.example.yaml). Create config.yaml to customize.");
 }
 const config = yaml.load(readFileSync(configPath, "utf-8"));
 const defaults = config.defaults || {};
