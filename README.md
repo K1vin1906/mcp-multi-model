@@ -25,8 +25,9 @@ Works with any OpenAI-compatible API or Google Gemini API. Pre-configured exampl
 | DeepSeek | `openai` | Code, math, logic. Very low cost |
 | Gemini | `gemini` | Long context, broad knowledge, Google Search |
 | Kimi (Moonshot) | `openai` | Chinese web search, real-time info |
+| **Ollama / LM Studio / llama.cpp** | `openai` | **Local models — no API key, no cost, full privacy** |
 
-Add more models (GPT-4o, Qwen, Yi, Mistral, etc.) by adding entries to `config.yaml`.
+Add more models (GPT-4o, Qwen, Yi, Mistral, etc.) by adding entries to `config.yaml`. Any OpenAI-compatible API works, including local model runners.
 
 ## Installation
 
@@ -121,6 +122,14 @@ models:
   #   api_key_env: DASHSCOPE_API_KEY
   #   model: qwen-plus
 
+  # Local models — no API key needed:
+  # ollama:
+  #   name: Ollama
+  #   adapter: openai
+  #   endpoint: http://localhost:11434/v1/chat/completions
+  #   model: llama3.2
+  #   description: "Local Ollama model. No API key, no cost, full privacy."
+
 tools:
   translate:
     model: deepseek
@@ -129,6 +138,39 @@ tools:
     model: gemini
     description: "Tech research with web search via Gemini."
 ```
+
+## Local Models
+
+Any OpenAI-compatible local model runner works out of the box. Just omit `api_key_env`:
+
+**Ollama**
+```bash
+ollama pull llama3.2
+```
+```yaml
+models:
+  ollama:
+    name: Ollama
+    adapter: openai
+    endpoint: http://localhost:11434/v1/chat/completions
+    model: llama3.2
+    description: "Local Llama 3.2 via Ollama."
+```
+
+**LM Studio**
+```yaml
+models:
+  lmstudio:
+    name: LM Studio
+    adapter: openai
+    endpoint: http://localhost:1234/v1/chat/completions
+    model: loaded-model
+    description: "Local model via LM Studio."
+```
+
+**llama.cpp / vLLM / text-generation-webui** — any server with `/v1/chat/completions` endpoint works the same way.
+
+You can mix local and cloud models freely — e.g., use `ask_all` to compare Ollama vs DeepSeek vs Gemini in one call.
 
 ## MCP Tools
 

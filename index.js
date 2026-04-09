@@ -69,8 +69,8 @@ setInterval(() => {
 // 解析模型配置
 const models = {};
 for (const [key, cfg] of Object.entries(config.models || {})) {
-  const apiKey = process.env[cfg.api_key_env];
-  if (!apiKey) {
+  const apiKey = cfg.api_key_env ? process.env[cfg.api_key_env] : "";
+  if (cfg.api_key_env && !apiKey) {
     console.error(`⚠️  ${cfg.name}: ${cfg.api_key_env} 未设置，跳过`);
     continue;
   }
@@ -254,7 +254,8 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
     reqBody.tools = [{ type: "builtin_function", function: { name: "$web_search" } }];
   }
 
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${modelCfg.apiKey}` };
+  const headers = { "Content-Type": "application/json" };
+  if (modelCfg.apiKey) headers.Authorization = `Bearer ${modelCfg.apiKey}`;
 
   // 有工具循环的模型（如 Kimi web_search）使用非流式
   if (hasToolLoop) {
@@ -567,7 +568,7 @@ if (researchCfg && models[researchCfg.model]) {
 // ── 启动 ──
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`🚀 MCP Multi-Model Server v3.0.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
+console.error(`🚀 MCP Multi-Model Server v3.1.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
 
 process.on("exit", () => { if (ownsSocket) try { unlinkSync(SOCKET_PATH); } catch {} });
 process.on("SIGINT", () => process.exit());

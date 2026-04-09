@@ -47,6 +47,29 @@ models:
       input: 1.00    # $/M tokens
       output: 1.00   # $/M tokens
 
+  # ── Local models (Ollama / LM Studio / llama.cpp) ──
+  # Uncomment and adjust to use local models. No API key needed.
+  #
+  # ollama:
+  #   name: Ollama
+  #   adapter: openai
+  #   endpoint: http://localhost:11434/v1/chat/completions
+  #   model: llama3.2
+  #   description: "Local Ollama model. No API key, no cost, full privacy."
+  #   pricing:
+  #     input: 0
+  #     output: 0
+  #
+  # lmstudio:
+  #   name: LM Studio
+  #   adapter: openai
+  #   endpoint: http://localhost:1234/v1/chat/completions
+  #   model: loaded-model
+  #   description: "Local LM Studio model."
+  #   pricing:
+  #     input: 0
+  #     output: 0
+
 # 特殊工具配置
 tools:
   translate:
