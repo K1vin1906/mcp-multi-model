@@ -96,26 +96,47 @@ const udsServer = net.createServer((client) => {
   client.on("error", () => monitorClients.delete(client));
 });
 
-function listenSocket(retry = false) {
+function listenSocket() {
+  if (ownsSocket) return; // 已经在监听
   udsServer.listen(SOCKET_PATH, () => {
     ownsSocket = true;
     console.error("📡 Monitor socket: " + SOCKET_PATH);
   });
   udsServer.once("error", (err) => {
-    if (err.code === "EADDRINUSE" && !retry) {
-      // probe: 连得上说明有活进程在用，跳过；连不上说明是残留，清理重建
+    if (err.code === "EADDRINUSE") {
+      // probe: 连得上说明有活进程在用；连不上说明是残留，清理重建
       const probe = net.createConnection(SOCKET_PATH);
       probe.on("connect", () => {
         probe.destroy();
-        console.error("📡 Monitor socket in use by another instance, skipping");
+        console.error("📡 Monitor socket in use by another instance, will retry in 30s");
       });
       probe.on("error", () => {
         try { unlinkSync(SOCKET_PATH); } catch {}
-        listenSocket(true);
+        // 立即重试一次
+        udsServer.listen(SOCKET_PATH, () => {
+          ownsSocket = true;
+          console.error("📡 Monitor socket: " + SOCKET_PATH);
+        });
       });
     }
   });
 }
+
+// 定期重试，直到拿到 socket
+const socketRetryInterval = setInterval(() => {
+  if (ownsSocket) { clearInterval(socketRetryInterval); return; }
+  if (existsSync(SOCKET_PATH)) {
+    // 探测是否还活着
+    const probe = net.createConnection(SOCKET_PATH);
+    probe.on("connect", () => probe.destroy()); // 还在用，下次再试
+    probe.on("error", () => {
+      try { unlinkSync(SOCKET_PATH); } catch {}
+      listenSocket();
+    });
+  } else {
+    listenSocket();
+  }
+}, 30_000);
 listenSocket();
 
 function emitEvent(event) {
@@ -440,6 +461,68 @@ if (modelKeys.length >= 2) {
     parts.push("\n" + "═".repeat(50) + "\n");
     parts.push(results[1].status === "fulfilled" ? fmt(names[1], results[1].value) : `━━━ ${names[1]} 错误 ━━━\n${results[1].reason?.message}`);
     return { content: [{ type: "text", text: parts.join("\n") }] };
+  });
+}
+
+// delegate — 智能委派路由工具
+const routingCfg = config.routing;
+if (routingCfg) {
+  const categories = routingCfg.categories || {};
+  const categoryNames = Object.keys(categories);
+  const fallbackModel = routingCfg.fallback || modelKeys[0];
+
+  // 关键词匹配：扫描 task 文本，返回 { category, model, reason }
+  function routeTask(task, hintCategory) {
+    // 如果有明确的 category hint，直接使用
+    if (hintCategory && categories[hintCategory]) {
+      const cat = categories[hintCategory];
+      const target = models[cat.delegate_to] ? cat.delegate_to : fallbackModel;
+      return { category: hintCategory, model: target, reason: cat.reason };
+    }
+    // 关键词扫描
+    const taskLower = task.toLowerCase();
+    let bestMatch = null;
+    let bestScore = 0;
+    for (const [catName, cat] of Object.entries(categories)) {
+      if (!models[cat.delegate_to]) continue;
+      let score = 0;
+      for (const kw of cat.keywords || []) {
+        if (taskLower.includes(kw.toLowerCase())) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = { category: catName, model: cat.delegate_to, reason: cat.reason };
+      }
+    }
+    if (bestMatch) return bestMatch;
+    return { category: "default", model: fallbackModel, reason: "无明确匹配，使用默认模型" };
+  }
+
+  const categoryEnum = categoryNames.length > 0
+    ? z.enum([...categoryNames, "auto"]).optional().default("auto")
+    : z.string().optional().default("auto");
+
+  server.tool("delegate", "智能委派：根据任务内容自动选择最合适的模型执行。Claude 不想干的活丢过来。", {
+    task: z.string().describe("任务描述，详细说明需要做什么"),
+    category: categoryEnum.describe(`任务类别提示（${categoryNames.join("/")}），auto 为自动判断`),
+    system_prompt: z.string().optional().describe("额外的系统提示词"),
+    max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("最大 token 数"),
+    conversation_id: z.string().optional().describe("对话 ID"),
+  }, async ({ task, category, system_prompt, max_tokens, conversation_id }) => {
+    try {
+      const route = routeTask(task, category === "auto" ? null : category);
+      const opts = {
+        systemPrompt: system_prompt || "",
+        maxTokens: max_tokens,
+        conversationId: conversation_id || "",
+      };
+      emitEvent({ type: "DELEGATE_ROUTE", task: task.slice(0, 200), category: route.category, model: route.model, reason: route.reason });
+      const r = await callModel(route.model, task, opts);
+      const header = `🎯 委派路由: ${route.category} → ${models[route.model].name} (${route.reason})`;
+      return { content: [{ type: "text", text: `${header}\n\n${fmt(models[route.model].name, r)}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `委派错误: ${e.message}` }], isError: true };
+    }
   });
 }
 
