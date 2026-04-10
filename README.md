@@ -12,7 +12,10 @@ An MCP server that lets Claude Code query multiple AI models (DeepSeek, Gemini, 
 - **Built-in tools** — `translate` (CN/EN) and `research` (with web search) out of the box
 - **Web search** — Kimi web search and Gemini Google Search grounding
 - **Cost tracking** — Per-call token usage and cost estimation based on model pricing
-- **Auto-retry** — Exponential backoff on 429/5xx errors and network failures
+- **Auto-retry & fallback** — Exponential backoff on 429/5xx, plus automatic fallback to a backup model on failure
+- **Health check** — `check_health` tool to ping all models and report status/latency
+- **Response caching** — Cache identical prompts with configurable TTL to save cost and time
+- **Daily budget limit** — Set a daily spending cap; calls are blocked when exceeded
 - **YAML config** — Add new models by editing `config.yaml`, no code changes needed
 - **Real-time monitoring** — Optional [Agent Monitor](https://github.com/K1vin1906/agent-monitor) TUI dashboard via Unix socket
 
@@ -88,6 +91,8 @@ defaults:
   temperature: 0.7
   timeout_ms: 60000
   max_retries: 2
+  # cache_ttl_ms: 300000   # Cache identical prompts for 5 min (0 = disabled)
+  # daily_budget_usd: 5.0  # Daily spending limit in USD (omit = unlimited)
 
 models:
   deepseek:
@@ -97,6 +102,7 @@ models:
     api_key_env: DEEPSEEK_API_KEY      # reads from environment
     model: deepseek-chat
     description: "Code, math, logic. Low cost."
+    fallback_to: gemini                # auto-fallback if this model fails
     pricing:
       input: 0.14    # $/M tokens
       output: 0.28
@@ -183,6 +189,7 @@ Tools are dynamically generated from your config. With the default 3-model setup
 | `ask_kimi` | Query Kimi |
 | `ask_all` | Query all models in parallel, compare results |
 | `ask_both` | Query any two models in parallel |
+| `check_health` | Ping all models, report online/offline status and latency |
 | `translate` | CN/EN translation |
 | `research` | Tech research with web search |
 

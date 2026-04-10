@@ -37,6 +37,8 @@ const DEFAULT_MAX_TOKENS = defaults.max_tokens || 4000;
 const DEFAULT_TEMP = defaults.temperature || 0.7;
 const MAX_HISTORY_TURNS = defaults.max_history_turns || 10;
 const CONVERSATION_EXPIRY = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL = defaults.cache_ttl_ms || 0; // 0 = disabled
+const DAILY_BUDGET = defaults.daily_budget_usd ?? Infinity;
 
 // ── 对话历史管理 ──
 const conversations = new Map(); // id -> { [modelKey]: { messages: [], lastAccess } }
@@ -66,6 +68,32 @@ setInterval(() => {
   }
 }, 60_000);
 
+// ── Response cache ──
+const responseCache = new Map(); // cacheKey -> { result, expires }
+
+function makeCacheKey(modelKey, prompt, systemPrompt) {
+  return `${modelKey}\0${prompt}\0${systemPrompt || ""}`;
+}
+
+// 定期清理过期缓存
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of responseCache) {
+    if (now >= v.expires) responseCache.delete(k);
+  }
+}, 60_000);
+
+// ── Budget tracking ──
+const budget = { date: new Date().toDateString(), spent: 0 };
+
+function checkBudget() {
+  const today = new Date().toDateString();
+  if (today !== budget.date) { budget.spent = 0; budget.date = today; }
+  if (budget.spent >= DAILY_BUDGET) {
+    throw new Error(`Daily budget ($${DAILY_BUDGET}) exceeded. Spent today: $${budget.spent.toFixed(4)}`);
+  }
+}
+
 // 解析模型配置
 const models = {};
 for (const [key, cfg] of Object.entries(config.models || {})) {
@@ -75,7 +103,7 @@ for (const [key, cfg] of Object.entries(config.models || {})) {
     continue;
   }
   const pricing = cfg.pricing || {};
-  models[key] = { ...cfg, key, apiKey, pricing: { input: pricing.input || 0, output: pricing.output || 0 } };
+  models[key] = { ...cfg, key, apiKey, fallbackTo: cfg.fallback_to || null, pricing: { input: pricing.input || 0, output: pricing.output || 0 } };
 }
 
 const modelKeys = Object.keys(models);
@@ -366,11 +394,24 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
 // ── 通用调用入口 ──
 const adapters = { openai: adapterOpenAI, gemini: adapterGemini };
 
-async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "" } = {}) {
+async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false } = {}) {
   const cfg = models[key];
   if (!cfg) throw new Error(`模型 "${key}" 未配置或 API key 缺失`);
   const adapter = adapters[cfg.adapter];
   if (!adapter) throw new Error(`未知的 adapter 类型: ${cfg.adapter}`);
+
+  // Budget check
+  checkBudget();
+
+  // Cache lookup (skip for conversations and explicit bypass)
+  const ck = makeCacheKey(key, prompt, systemPrompt);
+  if (CACHE_TTL > 0 && !conversationId && !_skipCache) {
+    const cached = responseCache.get(ck);
+    if (cached && Date.now() < cached.expires) {
+      emitEvent({ type: "CACHE_HIT", agent: key, prompt: prompt.slice(0, 100) });
+      return { ...cached.result };
+    }
+  }
 
   const history = getHistory(conversationId, key);
   const t0 = Date.now();
@@ -379,11 +420,24 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
     const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history);
     result.duration_ms = Date.now() - t0;
     result.cost_usd = calcCost(result.tokens, cfg.pricing);
+    budget.spent += result.cost_usd;
     saveHistory(conversationId, key, prompt, result.content);
     emitEvent({ type: "AGENT_END", agent: key, model: result.model, content: result.content, tokens: result.tokens, duration_ms: result.duration_ms, cost_usd: result.cost_usd });
+
+    // Cache store
+    if (CACHE_TTL > 0 && !conversationId && !_skipCache) {
+      responseCache.set(ck, { result: { ...result }, expires: Date.now() + CACHE_TTL });
+    }
+
     return result;
   } catch (e) {
-    emitEvent({ type: "AGENT_ERROR", agent: key, error: e.message, duration_ms: Date.now() - t0 });
+    const duration = Date.now() - t0;
+    emitEvent({ type: "AGENT_ERROR", agent: key, error: e.message, duration_ms: duration });
+    // Fallback: if not already a fallback attempt and a fallback model is configured
+    if (!_isFallback && cfg.fallbackTo && models[cfg.fallbackTo]) {
+      emitEvent({ type: "AGENT_FALLBACK", from: key, to: cfg.fallbackTo, error: e.message });
+      return callModel(cfg.fallbackTo, prompt, { systemPrompt, maxTokens, conversationId, _isFallback: true });
+    }
     throw e;
   }
 }
@@ -402,7 +456,7 @@ function fmt(name, r) {
 }
 
 // ── MCP Server ──
-const server = new McpServer({ name: "mcp-multi-model", version: "3.0.0" }, { capabilities: { logging: {} } });
+const server = new McpServer({ name: "mcp-multi-model", version: "3.2.0" }, { capabilities: { logging: {} } });
 
 // 动态注册每个模型的 ask_{key} 工具
 for (const [key, cfg] of Object.entries(models)) {
@@ -420,6 +474,30 @@ for (const [key, cfg] of Object.entries(models)) {
     }
   });
 }
+
+// check_health — 检查所有模型健康状态
+server.tool("check_health", "Ping all configured models and report online/offline status with latency.", {}, async () => {
+  const results = await Promise.allSettled(
+    modelKeys.map(async (key) => {
+      const cfg = models[key];
+      const adapter = adapters[cfg.adapter];
+      const t0 = Date.now();
+      try {
+        await adapter(cfg, "Hi", "", 5, []);
+        return { key, name: cfg.name, status: "online", latency_ms: Date.now() - t0 };
+      } catch (e) {
+        return { key, name: cfg.name, status: "offline", latency_ms: Date.now() - t0, error: e.message };
+      }
+    })
+  );
+  const lines = results.map(r => {
+    const v = r.status === "fulfilled" ? r.value : { name: "?", status: "error", latency_ms: 0, error: r.reason?.message };
+    const icon = v.status === "online" ? "✅" : "❌";
+    const err = v.error ? ` — ${v.error}` : "";
+    return `${icon} ${v.name}: ${v.status} (${v.latency_ms}ms)${err}`;
+  });
+  return { content: [{ type: "text", text: lines.join("\n") }] };
+});
 
 // ask_all — 并行调用所有模型
 if (modelKeys.length >= 2) {
@@ -568,7 +646,7 @@ if (researchCfg && models[researchCfg.model]) {
 // ── 启动 ──
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`🚀 MCP Multi-Model Server v3.1.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
+console.error(`🚀 MCP Multi-Model Server v3.2.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
 
 process.on("exit", () => { if (ownsSocket) try { unlinkSync(SOCKET_PATH); } catch {} });
 process.on("SIGINT", () => process.exit());
