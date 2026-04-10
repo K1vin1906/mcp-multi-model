@@ -4,7 +4,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import net from "net";
 import yaml from "js-yaml";
-import { existsSync, unlinkSync, readFileSync } from "fs";
+import { existsSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -94,12 +95,22 @@ function checkBudget() {
   }
 }
 
+// ── API key 申请链接 ──
+const API_KEY_URLS = {
+  DEEPSEEK_API_KEY: "https://platform.deepseek.com/api_keys",
+  GEMINI_API_KEY: "https://aistudio.google.com/apikey",
+  KIMI_API_KEY: "https://platform.moonshot.cn/console/api-keys",
+  OPENAI_API_KEY: "https://platform.openai.com/api-keys",
+};
+
 // 解析模型配置
 const models = {};
+const skippedModels = []; // { name, envVar, url }
 for (const [key, cfg] of Object.entries(config.models || {})) {
   const apiKey = cfg.api_key_env ? process.env[cfg.api_key_env] : "";
   if (cfg.api_key_env && !apiKey) {
-    console.error(`⚠️  ${cfg.name}: ${cfg.api_key_env} 未设置，跳过`);
+    skippedModels.push({ name: cfg.name, envVar: cfg.api_key_env, url: API_KEY_URLS[cfg.api_key_env] });
+    console.error(`⚠️  ${cfg.name}: ${cfg.api_key_env} not set, skipped`);
     continue;
   }
   const pricing = cfg.pricing || {};
@@ -108,7 +119,7 @@ for (const [key, cfg] of Object.entries(config.models || {})) {
 
 const modelKeys = Object.keys(models);
 if (modelKeys.length === 0) {
-  console.error("❌ 没有可用的模型，请检查 .env 和 config.yaml");
+  console.error("❌ No models available. Check your API keys and config.yaml");
   process.exit(1);
 }
 console.error(`✅ Loaded ${modelKeys.length} models: ${modelKeys.join(", ")}`);
@@ -680,7 +691,8 @@ if (imgGenCfg && models[imgGenCfg.model]) {
   server.tool("generate_image", imgGenCfg.description || "Generate images from text descriptions.", {
     prompt: z.string().describe("Image description / what to generate"),
     aspect_ratio: z.enum(["1:1", "3:2", "4:3", "16:9", "9:16"]).optional().default("1:1").describe("Image aspect ratio"),
-  }, async ({ prompt, aspect_ratio }) => {
+    save_path: z.string().optional().describe("Save image to this path. If omitted, saves to /tmp/mcp-images/ and auto-opens."),
+  }, async ({ prompt, aspect_ratio, save_path }) => {
     try {
       const modelKey = imgGenCfg.model;
       const r = await callModel(modelKey, prompt, {
@@ -689,12 +701,35 @@ if (imgGenCfg && models[imgGenCfg.model]) {
       });
       const parts = [];
       if (r.content) parts.push({ type: "text", text: r.content });
+
+      // Save images to disk
+      const savedPaths = [];
       if (r.images?.length) {
-        for (const img of r.images) parts.push({ type: "image", data: img.data, mimeType: img.mimeType });
+        for (let i = 0; i < r.images.length; i++) {
+          const img = r.images[i];
+          const ext = img.mimeType?.includes("png") ? "png" : "jpg";
+          let filePath;
+          if (save_path) {
+            filePath = r.images.length === 1 ? save_path : save_path.replace(/(\.\w+)$/, `_${i}$1`);
+          } else {
+            const tmpDir = "/tmp/mcp-images";
+            mkdirSync(tmpDir, { recursive: true });
+            const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+            filePath = join(tmpDir, `img_${ts}${r.images.length > 1 ? `_${i}` : ""}.${ext}`);
+          }
+          writeFileSync(filePath, Buffer.from(img.data, "base64"));
+          savedPaths.push(filePath);
+        }
+        // Auto-open when saving to /tmp (no explicit save_path)
+        if (!save_path) {
+          try { execSync(`open "${savedPaths[0]}"`); } catch {}
+        }
       }
+
       const sec = (r.duration_ms / 1000).toFixed(1);
       const costStr = r.cost_usd > 0 ? ` · $${r.cost_usd.toFixed(6)}` : "";
-      parts.push({ type: "text", text: `[${models[modelKey].name} · ${r.tokens.total} tokens · ${sec}s${costStr}]` });
+      const pathStr = savedPaths.length ? ` · ${savedPaths.join(", ")}` : "";
+      parts.push({ type: "text", text: `[${models[modelKey].name} · ${r.tokens.total} tokens · ${sec}s${costStr}${pathStr}]` });
       return { content: parts };
     } catch (e) {
       return { content: [{ type: "text", text: `Image generation error: ${e.message}` }], isError: true };
@@ -706,6 +741,18 @@ if (imgGenCfg && models[imgGenCfg.model]) {
 const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error(`🚀 MCP Multi-Model Server v3.3.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
+
+// ── 启动提示：缺失 API key ──
+if (skippedModels.length > 0) {
+  const lines = ["⚠️ Some models are disabled due to missing API keys:\n"];
+  for (const m of skippedModels) {
+    lines.push(`  • ${m.name} — set ${m.envVar}${m.url ? ` (get key: ${m.url})` : ""}`);
+  }
+  lines.push("\nAdd keys to your MCP config env block or .env file to enable them.");
+  const msg = lines.join("\n");
+  console.error(msg);
+  try { await server.sendLoggingMessage({ level: "warning", data: msg }); } catch {}
+}
 
 process.on("exit", () => { if (ownsSocket) try { unlinkSync(SOCKET_PATH); } catch {} });
 process.on("SIGINT", () => process.exit());
