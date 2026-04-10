@@ -272,7 +272,7 @@ async function fetchStream(url, options, { agent } = {}) {
 }
 
 // ── 适配器：OpenAI 兼容 ──
-async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history = []) {
+async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history = [], extra = {}) {
   const messages = [];
   const sysParts = [modelCfg.system_prefix, systemPrompt].filter(Boolean).join("\n\n");
   if (sysParts) messages.push({ role: "system", content: sysParts });
@@ -283,8 +283,9 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
     model: modelCfg.model,
     messages,
     max_tokens: maxTokens,
-    temperature: modelCfg.temperature || DEFAULT_TEMP,
+    temperature: extra.temperature ?? modelCfg.temperature ?? DEFAULT_TEMP,
   };
+  if (extra.topP != null) reqBody.top_p = extra.topP;
 
   const features = modelCfg.features || [];
   const hasToolLoop = features.includes("web_search");
@@ -363,8 +364,9 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
 
   const body = {
     contents,
-    generationConfig: { maxOutputTokens: maxTokens, temperature: DEFAULT_TEMP },
+    generationConfig: { maxOutputTokens: maxTokens, temperature: extra.temperature ?? DEFAULT_TEMP },
   };
+  if (extra.topP != null) body.generationConfig.topP = extra.topP;
 
   const features = modelCfg.features || [];
   if (features.includes("google_search")) {
@@ -517,7 +519,7 @@ async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durati
 // ── 通用调用入口 ──
 const adapters = { openai: adapterOpenAI, gemini: adapterGemini };
 
-async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false, imageConfig } = {}) {
+async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false, imageConfig, temperature, topP } = {}) {
   const cfg = models[key];
   if (!cfg) throw new Error(`模型 "${key}" 未配置或 API key 缺失`);
   const adapter = adapters[cfg.adapter];
@@ -540,7 +542,7 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
   const t0 = Date.now();
   emitEvent({ type: "AGENT_START", agent: key, model: cfg.model, prompt, systemPrompt, conversationId: conversationId || undefined, historyTurns: history.length / 2 });
   try {
-    const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history, { imageConfig });
+    const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history, { imageConfig, temperature, topP });
     result.duration_ms = Date.now() - t0;
     result.cost_usd = calcCost(result.tokens, cfg.pricing);
     budget.spent += result.cost_usd;
@@ -579,7 +581,7 @@ function fmt(name, r) {
 }
 
 // ── MCP Server ──
-const server = new McpServer({ name: "mcp-multi-model", version: "3.4.0" }, { capabilities: { logging: {} } });
+const server = new McpServer({ name: "mcp-multi-model", version: "3.5.0" }, { capabilities: { logging: {} } });
 
 // 动态注册每个模型的 ask_{key} 工具
 for (const [key, cfg] of Object.entries(models)) {
@@ -601,6 +603,36 @@ for (const [key, cfg] of Object.entries(models)) {
     }
   });
 }
+
+// ask_ai — 通用入口，指定模型 + 推理参数
+const modelEnum = z.enum(modelKeys);
+server.tool("ask_ai", `Unified entry point: send a prompt to any configured model (${modelKeys.join(", ")}). Supports per-call inference parameters.`, {
+  model: modelEnum.describe(`Target model key: ${modelKeys.join(", ")}`),
+  prompt: z.string().describe("The prompt to send"),
+  system_prompt: z.string().optional().describe("Optional system prompt"),
+  max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("Max output tokens"),
+  temperature: z.number().min(0).max(2).optional().describe("Sampling temperature (0-2). Overrides model default for this call."),
+  top_p: z.number().min(0).max(1).optional().describe("Top-p (nucleus sampling, 0-1). Overrides model default for this call."),
+  conversation_id: z.string().optional().describe("Conversation ID for multi-turn context"),
+}, async ({ model, prompt, system_prompt, max_tokens, temperature, top_p, conversation_id }) => {
+  try {
+    const r = await callModel(model, prompt, {
+      systemPrompt: system_prompt || "",
+      maxTokens: max_tokens,
+      conversationId: conversation_id || "",
+      temperature,
+      topP: top_p,
+    });
+    const cfg = models[model];
+    const parts = [{ type: "text", text: fmt(cfg.name, r) }];
+    if (r.images?.length) {
+      for (const img of r.images) parts.push({ type: "image", data: img.data, mimeType: img.mimeType });
+    }
+    return { content: parts };
+  } catch (e) {
+    return { content: [{ type: "text", text: `${models[model]?.name || model} error: ${e.message}` }], isError: true };
+  }
+});
 
 // check_health — 检查所有模型健康状态
 server.tool("check_health", "Ping all configured models and report online/offline status with latency.", {}, async () => {
@@ -879,7 +911,7 @@ if (vidGenCfg && models[vidGenCfg.model]) {
 // ── 启动 ──
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`🚀 MCP Multi-Model Server v3.4.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
+console.error(`🚀 MCP Multi-Model Server v3.5.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
 
 // ── 启动提示：缺失 API key ──
 if (skippedModels.length > 0) {
