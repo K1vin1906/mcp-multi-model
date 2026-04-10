@@ -59,7 +59,7 @@ models:
   #   adapter: gemini
   #   endpoint: https://generativelanguage.googleapis.com/v1beta
   #   api_key_env: GEMINI_API_KEY
-  #   model: gemini-2.5-flash-preview-image
+  #   model: gemini-2.5-flash-image
   #   description: "Generate images with Gemini 2.5 Flash Image. Fast, low cost."
   #   image_generation: true
   #   pricing:

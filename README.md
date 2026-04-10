@@ -190,7 +190,7 @@ models:
     adapter: gemini
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api_key_env: GEMINI_API_KEY
-    model: gemini-2.5-flash-preview-image   # Nano Banana — fast, 2K RPM free tier
+    model: gemini-2.5-flash-image   # Nano Banana — fast, 2K RPM free tier
     description: "Generate images with Gemini."
     image_generation: true
 
@@ -204,7 +204,7 @@ Available image models:
 
 | Model ID | Codename | Speed | Free RPM |
 |----------|----------|-------|----------|
-| `gemini-2.5-flash-preview-image` | Nano Banana | Fast (~3s) | 2,000 |
+| `gemini-2.5-flash-image` | Nano Banana | Fast (~3s) | 2,000 |
 | `gemini-3.1-flash-image-preview` | Nano Banana 2 | Medium (~5s) | 500 |
 | `gemini-3-pro-image-preview` | Nano Banana Pro | Slow (~10s) | 500 |
 
