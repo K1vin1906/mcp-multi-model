@@ -483,7 +483,7 @@ function fmt(name, r) {
 }
 
 // ── MCP Server ──
-const server = new McpServer({ name: "mcp-multi-model", version: "3.2.0" }, { capabilities: { logging: {} } });
+const server = new McpServer({ name: "mcp-multi-model", version: "3.3.0" }, { capabilities: { logging: {} } });
 
 // 动态注册每个模型的 ask_{key} 工具
 for (const [key, cfg] of Object.entries(models)) {
@@ -705,7 +705,7 @@ if (imgGenCfg && models[imgGenCfg.model]) {
 // ── 启动 ──
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`🚀 MCP Multi-Model Server v3.2.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
+console.error(`🚀 MCP Multi-Model Server v3.3.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
 
 process.on("exit", () => { if (ownsSocket) try { unlinkSync(SOCKET_PATH); } catch {} });
 process.on("SIGINT", () => process.exit());
