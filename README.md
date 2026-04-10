@@ -15,6 +15,7 @@ An MCP server that lets Claude Code query multiple AI models (DeepSeek, Gemini, 
 - **Auto-retry & fallback** — Exponential backoff on 429/5xx, plus automatic fallback to a backup model on failure
 - **Health check** — `check_health` tool to ping all models and report status/latency
 - **Response caching** — Cache identical prompts with configurable TTL to save cost and time
+- **Image generation** — Generate images via Gemini Nano Banana models with `generate_image` tool
 - **Daily budget limit** — Set a daily spending cap; calls are blocked when exceeded
 - **YAML config** — Add new models by editing `config.yaml`, no code changes needed
 - **Real-time monitoring** — Optional [Agent Monitor](https://github.com/K1vin1906/agent-monitor) TUI dashboard via Unix socket
@@ -178,6 +179,37 @@ models:
 
 You can mix local and cloud models freely — e.g., use `ask_all` to compare Ollama vs DeepSeek vs Gemini in one call.
 
+## Image Generation
+
+Generate images using Gemini's Nano Banana models. Uses the same `GEMINI_API_KEY`.
+
+```yaml
+models:
+  gemini-image:
+    name: Gemini Image
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: gemini-2.5-flash-preview-image   # Nano Banana — fast, 2K RPM free tier
+    description: "Generate images with Gemini."
+    image_generation: true
+
+tools:
+  generate_image:
+    model: gemini-image
+    description: "Generate images from text descriptions."
+```
+
+Available image models:
+
+| Model ID | Codename | Speed | Free RPM |
+|----------|----------|-------|----------|
+| `gemini-2.5-flash-preview-image` | Nano Banana | Fast (~3s) | 2,000 |
+| `gemini-3.1-flash-image-preview` | Nano Banana 2 | Medium (~5s) | 500 |
+| `gemini-3-pro-image-preview` | Nano Banana Pro | Slow (~10s) | 500 |
+
+The `generate_image` tool supports `aspect_ratio` parameter: `1:1`, `3:2`, `4:3`, `16:9`, `9:16`.
+
 ## MCP Tools
 
 Tools are dynamically generated from your config. With the default 3-model setup you get:
@@ -190,6 +222,7 @@ Tools are dynamically generated from your config. With the default 3-model setup
 | `ask_all` | Query all models in parallel, compare results |
 | `ask_both` | Query any two models in parallel |
 | `check_health` | Ping all models, report online/offline status and latency |
+| `generate_image` | Generate images from text prompts (requires Gemini image model) |
 | `translate` | CN/EN translation |
 | `research` | Tech research with web search |
 

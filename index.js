@@ -343,7 +343,7 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
 }
 
 // ── 适配器：Gemini ──
-async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history = []) {
+async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history = [], extra = {}) {
   const contents = history.map(msg => ({
     role: msg.role === "assistant" ? "model" : "user",
     parts: [{ text: msg.content }],
@@ -361,6 +361,33 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
   }
   if (systemPrompt) {
     body.systemInstruction = { parts: [{ text: systemPrompt }] };
+  }
+
+  // Image generation: non-streaming, responseModalities + imageConfig
+  if (modelCfg.image_generation) {
+    body.generationConfig.responseModalities = ["TEXT", "IMAGE"];
+    const imgCfg = extra.imageConfig || {};
+    if (Object.keys(imgCfg).length) body.generationConfig.imageConfig = imgCfg;
+
+    const url = `${modelCfg.endpoint}/models/${modelCfg.model}:generateContent?key=${modelCfg.apiKey}`;
+    const data = await fetchWithRetry(url,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      { agent: modelCfg.key }
+    );
+
+    let content = "";
+    const images = [];
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.text) content += part.text;
+      if (part.inlineData) images.push({ mimeType: part.inlineData.mimeType, data: part.inlineData.data });
+    }
+    const usage = data.usageMetadata || {};
+    return {
+      content, images,
+      model: modelCfg.model,
+      tokens: { prompt: usage.promptTokenCount || 0, completion: usage.candidatesTokenCount || 0, total: usage.totalTokenCount || 0 },
+    };
   }
 
   // 流式：streamGenerateContent + alt=sse
@@ -394,7 +421,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
 // ── 通用调用入口 ──
 const adapters = { openai: adapterOpenAI, gemini: adapterGemini };
 
-async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false } = {}) {
+async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false, imageConfig } = {}) {
   const cfg = models[key];
   if (!cfg) throw new Error(`模型 "${key}" 未配置或 API key 缺失`);
   const adapter = adapters[cfg.adapter];
@@ -417,7 +444,7 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
   const t0 = Date.now();
   emitEvent({ type: "AGENT_START", agent: key, model: cfg.model, prompt, systemPrompt, conversationId: conversationId || undefined, historyTurns: history.length / 2 });
   try {
-    const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history);
+    const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history, { imageConfig });
     result.duration_ms = Date.now() - t0;
     result.cost_usd = calcCost(result.tokens, cfg.pricing);
     budget.spent += result.cost_usd;
@@ -468,7 +495,11 @@ for (const [key, cfg] of Object.entries(models)) {
   }, async ({ prompt, system_prompt, max_tokens, conversation_id }) => {
     try {
       const r = await callModel(key, prompt, { systemPrompt: system_prompt || "", maxTokens: max_tokens, conversationId: conversation_id || "" });
-      return { content: [{ type: "text", text: fmt(cfg.name, r) }] };
+      const parts = [{ type: "text", text: fmt(cfg.name, r) }];
+      if (r.images?.length) {
+        for (const img of r.images) parts.push({ type: "image", data: img.data, mimeType: img.mimeType });
+      }
+      return { content: parts };
     } catch (e) {
       return { content: [{ type: "text", text: `${cfg.name} 错误: ${e.message}` }], isError: true };
     }
@@ -639,6 +670,34 @@ if (researchCfg && models[researchCfg.model]) {
       return { content: [{ type: "text", text: `研究结果:\n\n${r.content}\n\n[${models[researchCfg.model].name} · ${r.tokens.total} tokens · ${(r.duration_ms / 1000).toFixed(1)}s]` }] };
     } catch (e) {
       return { content: [{ type: "text", text: `研究错误: ${e.message}` }], isError: true };
+    }
+  });
+}
+
+// generate_image — 图片生成工具
+const imgGenCfg = config.tools?.generate_image;
+if (imgGenCfg && models[imgGenCfg.model]) {
+  server.tool("generate_image", imgGenCfg.description || "Generate images from text descriptions.", {
+    prompt: z.string().describe("Image description / what to generate"),
+    aspect_ratio: z.enum(["1:1", "3:2", "4:3", "16:9", "9:16"]).optional().default("1:1").describe("Image aspect ratio"),
+  }, async ({ prompt, aspect_ratio }) => {
+    try {
+      const modelKey = imgGenCfg.model;
+      const r = await callModel(modelKey, prompt, {
+        imageConfig: { aspectRatio: aspect_ratio },
+        _skipCache: true,
+      });
+      const parts = [];
+      if (r.content) parts.push({ type: "text", text: r.content });
+      if (r.images?.length) {
+        for (const img of r.images) parts.push({ type: "image", data: img.data, mimeType: img.mimeType });
+      }
+      const sec = (r.duration_ms / 1000).toFixed(1);
+      const costStr = r.cost_usd > 0 ? ` · $${r.cost_usd.toFixed(6)}` : "";
+      parts.push({ type: "text", text: `[${models[modelKey].name} · ${r.tokens.total} tokens · ${sec}s${costStr}]` });
+      return { content: parts };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Image generation error: ${e.message}` }], isError: true };
     }
   });
 }

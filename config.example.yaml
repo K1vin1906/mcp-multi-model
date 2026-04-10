@@ -51,6 +51,21 @@ models:
       input: 1.00    # $/M tokens
       output: 1.00   # $/M tokens
 
+  # ── Image generation (Gemini Nano Banana) ──
+  # Uses the same GEMINI_API_KEY. Uncomment to enable generate_image tool.
+  #
+  # gemini-image:
+  #   name: Gemini Image
+  #   adapter: gemini
+  #   endpoint: https://generativelanguage.googleapis.com/v1beta
+  #   api_key_env: GEMINI_API_KEY
+  #   model: gemini-2.5-flash-preview-image
+  #   description: "Generate images with Gemini 2.5 Flash Image. Fast, low cost."
+  #   image_generation: true
+  #   pricing:
+  #     input: 0.10
+  #     output: 0.40
+
   # ── Local models (Ollama / LM Studio / llama.cpp) ──
   # Uncomment and adjust to use local models. No API key needed.
   #
@@ -82,3 +97,6 @@ tools:
   research:
     model: gemini
     description: "用 Gemini 做技术调研和分析总结（已联网）。"
+  # generate_image:
+  #   model: gemini-image
+  #   description: "Generate images from text descriptions using Gemini."
