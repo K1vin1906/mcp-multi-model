@@ -429,6 +429,91 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
   };
 }
 
+// ── Veo 视频生成（异步轮询） ──
+async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durationSeconds = 8 } = {}) {
+  const apiKey = modelCfg.apiKey;
+  const model = modelCfg.model;
+  const baseUrl = modelCfg.endpoint;
+
+  // Step 1: 提交生成请求
+  const submitUrl = `${baseUrl}/models/${model}:predictLongRunning?key=${apiKey}`;
+  emitEvent({ type: "AGENT_START", agent: modelCfg.key, model, prompt });
+
+  const submitBody = {
+    instances: [{ prompt }],
+    parameters: { sampleCount: 1, durationSeconds, aspectRatio },
+  };
+
+  const submitRes = await fetchWithRetry(submitUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(submitBody),
+  }, { agent: modelCfg.key });
+
+  const opName = submitRes.name;
+  if (!opName) throw new Error("No operation name in response: " + JSON.stringify(submitRes).slice(0, 500));
+
+  emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta: `[submitted: ${opName}]` });
+
+  // Step 2: 轮询等待完成
+  const VIDEO_TIMEOUT = 180_000; // 3 min
+  const POLL_INTERVAL = 5_000;   // 5s
+  const t0 = Date.now();
+
+  while (Date.now() - t0 < VIDEO_TIMEOUT) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+    const pollUrl = `${baseUrl}/${opName}?key=${apiKey}`;
+    const pollRes = await fetch(pollUrl, { signal: AbortSignal.timeout(30_000) });
+    if (!pollRes.ok) {
+      const errText = await pollRes.text();
+      throw new Error(`Video poll error (${pollRes.status}): ${errText}`);
+    }
+    const status = await pollRes.json();
+
+    if (status.error) {
+      throw new Error(`Video generation failed: ${JSON.stringify(status.error)}`);
+    }
+
+    const elapsed = Math.round((Date.now() - t0) / 1000);
+    emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta: `[polling ${elapsed}s...]` });
+
+    if (status.done) {
+      // 尝试多种可能的响应格式
+      const resp = status.response || {};
+      const samples = resp.generateVideoResponse?.generatedSamples
+        || resp.generatedVideos
+        || [];
+
+      if (!samples.length) throw new Error("Video generation completed but no samples: " + JSON.stringify(status).slice(0, 1000));
+
+      const videos = [];
+      for (const sample of samples) {
+        const videoObj = sample.video || sample;
+        const uri = videoObj.uri;
+        if (!uri) continue;
+
+        // 下载视频文件
+        const dlUrl = uri.includes("key=") ? uri : `${uri}${uri.includes("?") ? "&" : "?"}key=${apiKey}`;
+        const dlRes = await fetch(dlUrl, { signal: AbortSignal.timeout(60_000) });
+        if (!dlRes.ok) throw new Error(`Video download failed (${dlRes.status}): ${await dlRes.text()}`);
+        const buffer = Buffer.from(await dlRes.arrayBuffer());
+        const encoding = videoObj.encoding || "video/mp4";
+        const ext = encoding.includes("webm") ? "webm" : "mp4";
+        videos.push({ buffer, ext });
+      }
+
+      if (!videos.length) throw new Error("No downloadable videos in response");
+
+      const duration_ms = Date.now() - t0;
+      emitEvent({ type: "AGENT_END", agent: modelCfg.key, model, duration_ms, content: `[${videos.length} video(s) generated]` });
+      return { videos, duration_ms };
+    }
+  }
+
+  throw new Error(`Video generation timed out (${VIDEO_TIMEOUT / 1000}s)`);
+}
+
 // ── 通用调用入口 ──
 const adapters = { openai: adapterOpenAI, gemini: adapterGemini };
 
@@ -494,7 +579,7 @@ function fmt(name, r) {
 }
 
 // ── MCP Server ──
-const server = new McpServer({ name: "mcp-multi-model", version: "3.3.0" }, { capabilities: { logging: {} } });
+const server = new McpServer({ name: "mcp-multi-model", version: "3.4.0" }, { capabilities: { logging: {} } });
 
 // 动态注册每个模型的 ask_{key} 工具
 for (const [key, cfg] of Object.entries(models)) {
@@ -712,7 +797,7 @@ if (imgGenCfg && models[imgGenCfg.model]) {
           if (save_path) {
             filePath = r.images.length === 1 ? save_path : save_path.replace(/(\.\w+)$/, `_${i}$1`);
           } else {
-            const tmpDir = "/tmp/mcp-images";
+            const tmpDir = "/tmp/mcp-media/images";
             mkdirSync(tmpDir, { recursive: true });
             const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
             filePath = join(tmpDir, `img_${ts}${r.images.length > 1 ? `_${i}` : ""}.${ext}`);
@@ -737,10 +822,64 @@ if (imgGenCfg && models[imgGenCfg.model]) {
   });
 }
 
+// generate_video — 视频生成工具
+const vidGenCfg = config.tools?.generate_video;
+if (vidGenCfg && models[vidGenCfg.model]) {
+  server.tool("generate_video", vidGenCfg.description || "Generate videos from text descriptions.", {
+    prompt: z.string().describe("Video description / what to generate"),
+    aspect_ratio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Video aspect ratio"),
+    duration: z.union([z.literal(4), z.literal(6), z.literal(8)]).optional().default(8).describe("Duration in seconds (4, 6, or 8)"),
+    save_path: z.string().optional().describe("Save video to this path. If omitted, saves to /tmp/mcp-media/videos/ and auto-opens."),
+  }, async ({ prompt, aspect_ratio, duration, save_path }) => {
+    try {
+      const modelKey = vidGenCfg.model;
+      const cfg = models[modelKey];
+      const r = await generateVeoVideo(cfg, prompt, {
+        aspectRatio: aspect_ratio,
+        durationSeconds: duration,
+      });
+
+      const savedPaths = [];
+      for (let i = 0; i < r.videos.length; i++) {
+        const vid = r.videos[i];
+        let filePath;
+        if (save_path) {
+          filePath = r.videos.length === 1 ? save_path : save_path.replace(/(\.\w+)$/, `_${i}$1`);
+        } else {
+          const tmpDir = "/tmp/mcp-media/videos";
+          mkdirSync(tmpDir, { recursive: true });
+          const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+          filePath = join(tmpDir, `vid_${ts}${r.videos.length > 1 ? `_${i}` : ""}.${vid.ext}`);
+        }
+        writeFileSync(filePath, vid.buffer);
+        savedPaths.push(filePath);
+      }
+
+      // Auto-open when saving to /tmp
+      if (!save_path && savedPaths.length) {
+        try { execSync(`open "${savedPaths[0]}"`); } catch {}
+      }
+
+      const sec = (r.duration_ms / 1000).toFixed(1);
+      const sizeKB = r.videos.reduce((sum, v) => sum + v.buffer.length, 0) / 1024;
+      const sizeStr = sizeKB > 1024 ? `${(sizeKB / 1024).toFixed(1)}MB` : `${Math.round(sizeKB)}KB`;
+      const pathStr = savedPaths.length ? ` · ${savedPaths.join(", ")}` : "";
+      return {
+        content: [{
+          type: "text",
+          text: `Video generated (${duration}s, ${aspect_ratio}, ${sizeStr}) in ${sec}s${pathStr}`,
+        }],
+      };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Video generation error: ${e.message}` }], isError: true };
+    }
+  });
+}
+
 // ── 启动 ──
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`🚀 MCP Multi-Model Server v3.3.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
+console.error(`🚀 MCP Multi-Model Server v3.4.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
 
 // ── 启动提示：缺失 API key ──
 if (skippedModels.length > 0) {
