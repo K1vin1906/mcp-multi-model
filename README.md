@@ -16,6 +16,8 @@ An MCP server that lets Claude Code query multiple AI models (DeepSeek, Gemini, 
 - **Health check** — `check_health` tool to ping all models and report status/latency
 - **Response caching** — Cache identical prompts with configurable TTL to save cost and time
 - **Image generation** — Generate images via Gemini Nano Banana models with `generate_image` tool
+- **Video generation** — Generate short video clips via Gemini Veo models with `generate_video` tool
+- **Unified `ask_ai` tool** — One tool to query any configured model, with per-call `temperature` / `top_p` inference control
 - **Daily budget limit** — Set a daily spending cap; calls are blocked when exceeded
 - **YAML config** — Add new models by editing `config.yaml`, no code changes needed
 - **Real-time monitoring** — Optional [Agent Monitor](https://github.com/K1vin1906/agent-monitor) TUI dashboard via Unix socket
@@ -210,12 +212,45 @@ Available image models:
 
 The `generate_image` tool supports `aspect_ratio` parameter: `1:1`, `3:2`, `4:3`, `16:9`, `9:16`.
 
+## Video Generation
+
+Generate short video clips from text prompts using Gemini Veo models. Uses the same `GEMINI_API_KEY`.
+
+```yaml
+models:
+  gemini-video:
+    name: Gemini Video
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: veo-3.1-generate-preview   # also: veo-3.1-fast-generate-preview, veo-3.1-lite-generate-preview
+    description: "Generate videos with Veo."
+    video_generation: true
+
+tools:
+  generate_video:
+    model: gemini-video
+    description: "Generate short videos from text prompts."
+```
+
+The `generate_video` tool parameters:
+
+| Parameter | Type | Notes |
+|-----------|------|-------|
+| `prompt` | string | Text description of the desired video |
+| `aspect_ratio` | `16:9` / `9:16` / `1:1` | |
+| `duration` | `4` / `6` / `8` (seconds) | Veo rejects odd seconds — the literal type is enforced |
+| `save_path` | string? | Custom save path; defaults to `/tmp/mcp-media/videos/vid_{timestamp}.mp4` |
+
+Generation uses long-running polling (up to 3 minutes).
+
 ## MCP Tools
 
 Tools are dynamically generated from your config. With the default 3-model setup you get:
 
 | Tool | Description |
 |------|-------------|
+| `ask_ai` | **Unified entry** — query any configured model via `model` parameter, with `temperature` / `top_p` control |
 | `ask_deepseek` | Query DeepSeek |
 | `ask_gemini` | Query Gemini |
 | `ask_kimi` | Query Kimi |
@@ -223,6 +258,7 @@ Tools are dynamically generated from your config. With the default 3-model setup
 | `ask_both` | Query any two models in parallel |
 | `check_health` | Ping all models, report online/offline status and latency |
 | `generate_image` | Generate images from text prompts (requires Gemini image model) |
+| `generate_video` | Generate short videos from text prompts (requires Gemini video model) |
 | `translate` | CN/EN translation |
 | `research` | Tech research with web search |
 
@@ -236,6 +272,14 @@ All `ask_*` tools accept:
 | `system_prompt` | string? | Optional system prompt |
 | `max_tokens` | number? | Max output tokens (default: 4000) |
 | `conversation_id` | string? | Pass same ID for multi-turn conversations |
+
+`ask_ai` additionally accepts:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Which configured model to query (e.g. `deepseek`, `gemini`, `kimi`) |
+| `temperature` | number? | Sampling temperature, 0–2 |
+| `top_p` | number? | Nucleus sampling, 0–1 |
 
 ## Usage in Claude Code
 
