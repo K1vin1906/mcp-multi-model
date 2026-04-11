@@ -281,25 +281,113 @@ All `ask_*` tools accept:
 | `temperature` | number? | Sampling temperature, 0–2 |
 | `top_p` | number? | Nucleus sampling, 0–1 |
 
-## Usage in Claude Code
+## Examples
 
-Once configured, just ask Claude naturally:
+Three complete examples showing prompt → tool call → expected output. They assume you've configured the relevant models in `config.yaml` (or via the Claude Desktop extension installer).
 
-```
-Ask DeepSeek to review this function for bugs
+### Example 1 — Compare the same question across all configured models
+
+**You say to Claude:**
+
+    Use ask_all to compare how DeepSeek, OpenAI, Gemini, and Kimi answer "What is 100 + 100?"
+
+**Claude invokes:**
+
+```json
+{
+  "name": "ask_all",
+  "arguments": {
+    "prompt": "What is 100 + 100?"
+  }
+}
 ```
 
-```
-Use ask_all to compare how each model would implement a binary search
+**Expected output** (each model's response with its latency and cost):
+
+    ━━━ DeepSeek ━━━
+    200
+    [deepseek-chat · 15 tokens · 6.0s · $0.000004]
+
+    ━━━ OpenAI ━━━
+    200
+    [gpt-4o-mini · 14 tokens · 3.7s · $0.000008]
+
+    ━━━ Gemini ━━━
+    200
+    [gemini-3-flash-preview · 12 tokens · 4.1s · $0.000008]
+
+    ━━━ Kimi ━━━
+    200
+    [moonshot-v1-auto · 16 tokens · 3.4s · $0.000060]
+
+All four models return `200`; side-by-side timing and cost let you see which provider is fastest and cheapest for your workload.
+
+### Example 2 — Technical research with Gemini Google Search grounding
+
+**You say to Claude:**
+
+    Research the current state of WebTransport browser support
+
+**Claude invokes:**
+
+```json
+{
+  "name": "research",
+  "arguments": {
+    "topic": "Current state of WebTransport browser support",
+    "depth": "standard"
+  }
+}
 ```
 
-```
-Research the current state of WebTransport browser support
+**Expected output** (Gemini grounds the answer in live Google Search results):
+
+    研究结果:
+
+    WebTransport is currently supported by Chromium-based browsers
+    (Chrome, Edge, Opera) since version 97 in 2022. Firefox has had it
+    behind a flag in Nightly since 2023; Safari has not shipped support
+    as of early 2026.
+    ...
+    (~500-word structured summary with implementation status and spec references)
+
+    [Gemini · 820 tokens · 5.4s]
+
+### Example 3 — Generate an image with Gemini Nano Banana
+
+**You say to Claude:**
+
+    Generate a 1:1 macOS app icon: glowing central orb with light streams converging inward, deep indigo gradient
+
+**Claude invokes:**
+
+```json
+{
+  "name": "generate_image",
+  "arguments": {
+    "prompt": "macOS app icon, squircle, glowing central orb with light streams converging inward, deep indigo gradient, Apple HIG style",
+    "aspect_ratio": "1:1"
+  }
+}
 ```
 
-```
-Translate this paragraph to English, technical style
-```
+**Expected output:**
+
+    Here's an icon for your macOS application...
+
+    [Gemini Image · 1408 tokens · 8.7s · $0.000540 · /tmp/mcp-media/images/img_2026-04-11T17-35-22.png]
+
+The 1024×1024 PNG is saved to `/tmp/mcp-media/images/` and auto-opens in your system's image viewer.
+
+## Privacy
+
+Multi-Model MCP is a **local relay**. It runs on your machine and does not send any data to an endpoint controlled by the extension author — no telemetry, no analytics, no crash reports.
+
+When you invoke a tool, the prompt is sent directly from your machine to the LLM provider you configured for that call (DeepSeek, Gemini, OpenAI, etc.) over HTTPS. That data is governed by the respective provider's privacy policy — please review each one before configuring their API key.
+
+Local state (conversation history, cost tracking, response cache) lives in process memory and is lost on restart. Generated media is saved to `/tmp/mcp-media/` and can be deleted at any time.
+
+**Full policy:** [k1vin1906.github.io/mcp-multi-model/privacy.html](https://k1vin1906.github.io/mcp-multi-model/privacy.html) (also available as [`PRIVACY.md`](./PRIVACY.md) in this repository)
 
 ## Agent Monitor (Optional)
 

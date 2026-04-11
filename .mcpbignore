@@ -1,0 +1,32 @@
+# Local-only config (MCPB users get their config from manifest user_config -> env vars,
+# with config.example.yaml as the fallback template). Shipping the maintainer's
+# personal config.yaml would override that flow and break the installer UX.
+config.yaml
+
+# Secrets (paranoid belt-and-suspenders — .env should never be in the repo anyway)
+.env
+.env.*
+!.env.example
+
+# Icon design artifacts (only icon.png is the real one)
+icon-candidate-*.png
+icon-hub-*.png
+
+# Demo assets (GIF + preview images are for the GitHub README, not runtime)
+demo/
+
+# Promotional/marketing material (not needed at runtime)
+zhihu-*.md
+zhihu-*.png
+
+# Previously built packages
+*.mcpb
+
+# Repo metadata that users don't need
+.github/
+
+# CI/smoke scripts — only used by GitHub Actions, not needed at runtime
+scripts/
+
+# GitHub Pages source (privacy policy HTML is hosted, not bundled)
+docs/

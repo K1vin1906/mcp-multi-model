@@ -1,5 +1,6 @@
 # mcp-multi-model 配置文件
 # 添加新模型只需在 models 下新增一项，支持 openai / gemini 两种 adapter
+# 未设置对应 api_key 的模型会在启动时自动跳过，所以这里可以把所有主流模型都预置好
 
 defaults:
   max_tokens: 4000
@@ -10,6 +11,7 @@ defaults:
   # daily_budget_usd: 5.0  # Daily spending limit in USD (omit = unlimited)
 
 models:
+  # ── DeepSeek ──
   deepseek:
     name: DeepSeek
     adapter: openai
@@ -17,11 +19,12 @@ models:
     api_key_env: DEEPSEEK_API_KEY
     model: deepseek-chat
     description: "向 DeepSeek 发送请求。擅长：中文内容、代码、数学、逻辑。成本低。"
-    fallback_to: gemini     # Auto-fallback to Gemini if DeepSeek fails
+    fallback_to: gemini
     pricing:
       input: 0.14    # $/M tokens
-      output: 0.28   # $/M tokens
+      output: 0.28
 
+  # ── Google Gemini ──
   gemini:
     name: Gemini
     adapter: gemini
@@ -29,13 +32,14 @@ models:
     api_key_env: GEMINI_API_KEY
     model: gemini-3-flash-preview
     description: "向 Gemini 发送请求。擅长：长文档、知识广度、创意写作。已启用 Google Search 联网。"
-    fallback_to: deepseek   # Auto-fallback to DeepSeek if Gemini fails
+    fallback_to: deepseek
     features:
       - google_search
     pricing:
-      input: 0.10    # $/M tokens
-      output: 0.40   # $/M tokens
+      input: 0.10
+      output: 0.40
 
+  # ── Moonshot Kimi ──
   kimi:
     name: Kimi
     adapter: openai
@@ -48,8 +52,80 @@ models:
       - web_search
     tool_loop_max: 5
     pricing:
-      input: 1.00    # $/M tokens
-      output: 1.00   # $/M tokens
+      input: 1.00
+      output: 1.00
+
+  # ── OpenAI (GPT) ──
+  openai:
+    name: OpenAI
+    adapter: openai
+    endpoint: https://api.openai.com/v1/chat/completions
+    api_key_env: OPENAI_API_KEY
+    model: gpt-4o-mini
+    description: "向 OpenAI GPT 发送请求。通用能力强，生态成熟。默认使用 gpt-4o-mini 节省成本。"
+    pricing:
+      input: 0.15    # gpt-4o-mini
+      output: 0.60
+
+  # ── OpenRouter (聚合多家模型) ──
+  openrouter:
+    name: OpenRouter
+    adapter: openai
+    endpoint: https://openrouter.ai/api/v1/chat/completions
+    api_key_env: OPENROUTER_API_KEY
+    model: openai/gpt-4o-mini
+    description: "通过 OpenRouter 访问 300+ 模型。model 字段改为 anthropic/claude-3.5-sonnet 等即可切换。"
+    pricing:
+      input: 0.15
+      output: 0.60
+
+  # ── Perplexity (内置联网) ──
+  perplexity:
+    name: Perplexity
+    adapter: openai
+    endpoint: https://api.perplexity.ai/chat/completions
+    api_key_env: PERPLEXITY_API_KEY
+    model: sonar
+    description: "向 Perplexity Sonar 发送请求。擅长：联网搜索、实时信息、引用来源。"
+    pricing:
+      input: 1.00
+      output: 1.00
+
+  # ── xAI Grok ──
+  grok:
+    name: Grok
+    adapter: openai
+    endpoint: https://api.x.ai/v1/chat/completions
+    api_key_env: XAI_API_KEY
+    model: grok-3
+    description: "向 xAI Grok 发送请求。擅长：实时 X/Twitter 信息、幽默风格、推理。"
+    pricing:
+      input: 2.00
+      output: 10.00
+
+  # ── Qwen (阿里通义千问) ──
+  qwen:
+    name: Qwen
+    adapter: openai
+    endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+    api_key_env: DASHSCOPE_API_KEY
+    model: qwen-plus
+    description: "向通义千问发送请求。擅长：中文语义理解、数学、代码。国内访问稳定。"
+    pricing:
+      input: 0.40
+      output: 1.20
+
+  # ── GLM (智谱 AI) ──
+  glm:
+    name: GLM
+    adapter: openai
+    endpoint: https://open.bigmodel.cn/api/paas/v4/chat/completions
+    api_key_env: ZHIPUAI_API_KEY
+    model: glm-4-plus
+    description: "向智谱 GLM 发送请求。擅长：中文对话、Agent 工具调用、长文本。"
+    pricing:
+      input: 0.50
+      output: 0.50
 
   # ── Image generation (Gemini Nano Banana) ──
   # Uses the same GEMINI_API_KEY. Uncomment to enable generate_image tool.

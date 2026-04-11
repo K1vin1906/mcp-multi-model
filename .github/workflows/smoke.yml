@@ -1,0 +1,33 @@
+name: Smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  startup:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install production dependencies
+        run: npm install --production
+
+      - name: Syntax check
+        run: node --check index.js
+
+      - name: Startup smoke test
+        run: node scripts/smoke.js
+
+      - name: Validate MCPB manifest
+        run: npx --yes @anthropic-ai/mcpb validate manifest.json

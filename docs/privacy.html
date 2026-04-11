@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Multi-Model MCP</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 0 20px 80px;
+      line-height: 1.6;
+      color: #24292f;
+    }
+    h1 { border-bottom: 1px solid #d0d7de; padding-bottom: 10px; }
+    h2 { margin-top: 32px; padding-bottom: 6px; border-bottom: 1px solid #eaecef; }
+    code { background: #f6f8fa; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+    table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #d0d7de; font-size: 0.95em; }
+    th { background: #f6f8fa; }
+    .meta { color: #57606a; font-size: 14px; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    ul, ol { padding-left: 24px; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy — Multi-Model MCP</h1>
+  <p class="meta">Last updated: 2026-04-11</p>
+
+  <h2>Overview</h2>
+  <p>Multi-Model MCP ("the extension") is a Model Context Protocol server that runs locally on your machine. It acts as a <strong>relay</strong> between Claude Desktop and third-party Large Language Model (LLM) providers that you explicitly configure. The extension does not run any backend service, cloud component, or telemetry endpoint.</p>
+
+  <h2>What data is collected by this extension</h2>
+  <p><strong>None.</strong></p>
+  <ul>
+    <li>No analytics, telemetry, crash reports, or usage metrics are sent to the extension author or any third party.</li>
+    <li>No prompts, responses, API keys, or any other content ever leaves your machine to an endpoint controlled by the extension author.</li>
+    <li>The extension performs no tracking or user identification.</li>
+  </ul>
+
+  <h2>What data leaves your machine</h2>
+  <p>When you invoke a tool (<code>ask_ai</code>, <code>ask_all</code>, <code>generate_image</code>, etc.), the extension sends your prompt (and any attached context such as <code>system_prompt</code> or <code>conversation_id</code>-linked history) to <strong>the LLM provider you configured for that call</strong>. This happens over HTTPS directly from your machine to the provider's API endpoint.</p>
+  <p>The data you send is governed entirely by the privacy policy of the provider you chose. Before configuring a provider's API key, please review that provider's own privacy policy:</p>
+  <table>
+    <thead><tr><th>Provider</th><th>Privacy Policy</th></tr></thead>
+    <tbody>
+      <tr><td>DeepSeek</td><td><a href="https://platform.deepseek.com/downloads/DeepSeek%20Privacy%20Policy.html">platform.deepseek.com</a></td></tr>
+      <tr><td>Google Gemini</td><td><a href="https://policies.google.com/privacy">policies.google.com</a></td></tr>
+      <tr><td>Moonshot Kimi</td><td><a href="https://www.moonshot.cn/privacy">moonshot.cn</a></td></tr>
+      <tr><td>OpenAI</td><td><a href="https://openai.com/policies/privacy-policy">openai.com</a></td></tr>
+      <tr><td>OpenRouter</td><td><a href="https://openrouter.ai/privacy">openrouter.ai</a></td></tr>
+      <tr><td>Perplexity</td><td><a href="https://www.perplexity.ai/hub/legal/privacy-policy">perplexity.ai</a></td></tr>
+      <tr><td>xAI Grok</td><td><a href="https://x.ai/legal/privacy-policy">x.ai</a></td></tr>
+      <tr><td>Qwen (Alibaba DashScope)</td><td><a href="https://www.alibabacloud.com/help/en/legal/latest/alibaba-cloud-international-website-privacy-policy">alibabacloud.com</a></td></tr>
+      <tr><td>GLM (Zhipu AI)</td><td><a href="https://www.bigmodel.cn/static/agreement/privacy.html">bigmodel.cn</a></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Local data storage</h2>
+  <p>The extension stores the following <strong>only on your local machine</strong>:</p>
+  <ol>
+    <li><strong>API keys</strong> — Provided through Claude Desktop's extension configuration UI (stored by Claude Desktop), or via a local <code>.env</code> file on your disk. Keys are never written anywhere else by this extension.</li>
+    <li><strong>Conversation history</strong> — Multi-turn context linked by <code>conversation_id</code>, held <strong>in process memory only</strong> for up to 30 minutes or 10 turns, whichever comes first. Nothing is written to disk. History is lost when the extension process exits.</li>
+    <li><strong>Cost tracking</strong> — A running tally of token usage and estimated cost, held in process memory, cleared on restart.</li>
+    <li><strong>Response cache</strong> (optional) — If <code>cache_ttl_ms</code> is configured, identical prompts are cached in process memory for the configured duration. Cache is lost on restart.</li>
+    <li><strong>Generated media</strong> — If you use <code>generate_image</code> or <code>generate_video</code>, files are written to <code>/tmp/mcp-media/</code> on macOS/Linux (or the equivalent temp directory on Windows). These files persist until your operating system cleans the temp directory (typically on reboot). You may delete them at any time.</li>
+  </ol>
+  <p>No files are written to any other location.</p>
+
+  <h2>Your control</h2>
+  <ul>
+    <li><strong>Revoke all data flow:</strong> Uninstall the extension from Claude Desktop, or remove the API key(s) for any provider you no longer want the extension to reach.</li>
+    <li><strong>Review logs:</strong> The extension writes diagnostic messages to Claude Desktop's extension log (standard location). These contain tool names, model names, and error messages but <strong>not</strong> full prompts or responses.</li>
+    <li><strong>Inspect the source code:</strong> The extension is open source (MIT License) at <a href="https://github.com/K1vin1906/mcp-multi-model">github.com/K1vin1906/mcp-multi-model</a>.</li>
+  </ul>
+
+  <h2>Changes to this policy</h2>
+  <p>Material changes will be announced via the project's GitHub releases page and reflected in both the <code>CHANGELOG.md</code> file and the "Last updated" date above.</p>
+
+  <h2>Contact</h2>
+  <p>Issues or questions: <a href="https://github.com/K1vin1906/mcp-multi-model/issues">github.com/K1vin1906/mcp-multi-model/issues</a></p>
+</body>
+</html>

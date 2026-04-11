@@ -2,3 +2,14 @@
 config.yaml
 node_modules/
 .DS_Store
+
+# Icon design drafts (only icon.png is the real one)
+icon-candidate-*.png
+icon-hub-*.png
+
+# Promotional/marketing material (not part of the runtime project)
+zhihu-*.md
+zhihu-*.png
+
+# Built MCPB packages (distribution artifact, not source)
+*.mcpb

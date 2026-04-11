@@ -101,6 +101,11 @@ const API_KEY_URLS = {
   GEMINI_API_KEY: "https://aistudio.google.com/apikey",
   KIMI_API_KEY: "https://platform.moonshot.cn/console/api-keys",
   OPENAI_API_KEY: "https://platform.openai.com/api-keys",
+  OPENROUTER_API_KEY: "https://openrouter.ai/keys",
+  PERPLEXITY_API_KEY: "https://www.perplexity.ai/settings/api",
+  XAI_API_KEY: "https://console.x.ai/",
+  DASHSCOPE_API_KEY: "https://dashscope.console.aliyun.com/apiKey",
+  ZHIPUAI_API_KEY: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
 };
 
 // 解析模型配置
@@ -590,7 +595,7 @@ for (const [key, cfg] of Object.entries(models)) {
     system_prompt: z.string().optional().describe("系统提示词"),
     max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("最大 token 数"),
     conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
-  }, async ({ prompt, system_prompt, max_tokens, conversation_id }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, max_tokens, conversation_id }) => {
     try {
       const r = await callModel(key, prompt, { systemPrompt: system_prompt || "", maxTokens: max_tokens, conversationId: conversation_id || "" });
       const parts = [{ type: "text", text: fmt(cfg.name, r) }];
@@ -614,7 +619,7 @@ server.tool("ask_ai", `Unified entry point: send a prompt to any configured mode
   temperature: z.number().min(0).max(2).optional().describe("Sampling temperature (0-2). Overrides model default for this call."),
   top_p: z.number().min(0).max(1).optional().describe("Top-p (nucleus sampling, 0-1). Overrides model default for this call."),
   conversation_id: z.string().optional().describe("Conversation ID for multi-turn context"),
-}, async ({ model, prompt, system_prompt, max_tokens, temperature, top_p, conversation_id }) => {
+}, { readOnlyHint: true, openWorldHint: true }, async ({ model, prompt, system_prompt, max_tokens, temperature, top_p, conversation_id }) => {
   try {
     const r = await callModel(model, prompt, {
       systemPrompt: system_prompt || "",
@@ -635,7 +640,7 @@ server.tool("ask_ai", `Unified entry point: send a prompt to any configured mode
 });
 
 // check_health — 检查所有模型健康状态
-server.tool("check_health", "Ping all configured models and report online/offline status with latency.", {}, async () => {
+server.tool("check_health", "Ping all configured models and report online/offline status with latency.", {}, { readOnlyHint: true, openWorldHint: true }, async () => {
   const results = await Promise.allSettled(
     modelKeys.map(async (key) => {
       const cfg = models[key];
@@ -664,7 +669,7 @@ if (modelKeys.length >= 2) {
     prompt: z.string().describe("通用提示词"),
     system_prompt: z.string().optional().describe("共用系统提示词"),
     conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
-  }, async ({ prompt, system_prompt, conversation_id }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
     const results = await Promise.allSettled(
       modelKeys.map(k => callModel(k, prompt, opts))
@@ -687,7 +692,7 @@ if (modelKeys.length >= 2) {
     model_b: modelEnum.optional().default(modelKeys[1]).describe("第二个模型"),
     system_prompt: z.string().optional().describe("共用系统提示词"),
     conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
-  }, async ({ prompt, model_a, model_b, system_prompt, conversation_id }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, model_a, model_b, system_prompt, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
     const results = await Promise.allSettled([
       callModel(model_a, prompt, opts),
@@ -746,7 +751,7 @@ if (routingCfg) {
     system_prompt: z.string().optional().describe("额外的系统提示词"),
     max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("最大 token 数"),
     conversation_id: z.string().optional().describe("对话 ID"),
-  }, async ({ task, category, system_prompt, max_tokens, conversation_id }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ task, category, system_prompt, max_tokens, conversation_id }) => {
     try {
       const route = routeTask(task, category === "auto" ? null : category);
       const opts = {
@@ -771,7 +776,7 @@ if (translateCfg && models[translateCfg.model]) {
     text: z.string().describe("需要翻译的文本"),
     target_language: z.enum(["中文", "英文", "auto"]).optional().default("auto").describe("目标语言"),
     style: z.enum(["formal", "casual", "technical"]).optional().default("formal").describe("翻译风格"),
-  }, async ({ text, target_language, style }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ text, target_language, style }) => {
     const styles = { formal: "正式专业", casual: "口语化", technical: "技术文档风格，保留专有名词" };
     const sys = `你是专业翻译。风格:${styles[style]}。目标语言:${target_language === "auto" ? "自动检测，中↔英互译" : target_language}。只输出翻译结果。`;
     try {
@@ -790,7 +795,7 @@ if (researchCfg && models[researchCfg.model]) {
     topic: z.string().describe("研究主题"),
     depth: z.enum(["brief", "standard", "deep"]).optional().default("standard").describe("研究深度"),
     language: z.enum(["中文", "英文"]).optional().default("中文").describe("输出语言"),
-  }, async ({ topic, depth, language }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ topic, depth, language }) => {
     const depths = { brief: "200字以内", standard: "500字左右", deep: "1000字以上，含背景、现状、优劣、建议" };
     const sys = `你是资深技术研究员。深度:${depths[depth]}。语言:${language}。结构化输出。`;
     try {
@@ -809,7 +814,7 @@ if (imgGenCfg && models[imgGenCfg.model]) {
     prompt: z.string().describe("Image description / what to generate"),
     aspect_ratio: z.enum(["1:1", "3:2", "4:3", "16:9", "9:16"]).optional().default("1:1").describe("Image aspect ratio"),
     save_path: z.string().optional().describe("Save image to this path. If omitted, saves to /tmp/mcp-images/ and auto-opens."),
-  }, async ({ prompt, aspect_ratio, save_path }) => {
+  }, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async ({ prompt, aspect_ratio, save_path }) => {
     try {
       const modelKey = imgGenCfg.model;
       const r = await callModel(modelKey, prompt, {
@@ -862,7 +867,7 @@ if (vidGenCfg && models[vidGenCfg.model]) {
     aspect_ratio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Video aspect ratio"),
     duration: z.union([z.literal(4), z.literal(6), z.literal(8)]).optional().default(8).describe("Duration in seconds (4, 6, or 8)"),
     save_path: z.string().optional().describe("Save video to this path. If omitted, saves to /tmp/mcp-media/videos/ and auto-opens."),
-  }, async ({ prompt, aspect_ratio, duration, save_path }) => {
+  }, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async ({ prompt, aspect_ratio, duration, save_path }) => {
     try {
       const modelKey = vidGenCfg.model;
       const cfg = models[modelKey];
