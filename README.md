@@ -1,5 +1,7 @@
 # mcp-multi-model
 
+> If you find this useful, please consider giving it a ⭐ — it helps others discover the project!
+
 An MCP server that lets Claude Code query multiple AI models (DeepSeek, Gemini, Kimi, and more) in parallel. Compare answers, leverage each model's strengths, and get real-time monitoring — all from within Claude Code.
 
 ![demo](demo/demo.gif)
