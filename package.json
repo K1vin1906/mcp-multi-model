@@ -1,7 +1,7 @@
 {
   "name": "mcp-multi-model",
-  "version": "3.6.0",
-  "description": "Give Claude Code superpowers \u2014 image/video generation, web search, smart routing across DeepSeek, Gemini, Kimi, and any OpenAI-compatible API",
+  "version": "3.6.1",
+  "description": "Give Claude Code superpowers — image/video generation, web search, smart routing across DeepSeek, Gemini, Kimi, and any OpenAI-compatible API",
   "main": "index.js",
   "bin": {
     "mcp-multi-model": "index.js"
