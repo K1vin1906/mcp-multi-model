@@ -1,7 +1,7 @@
 {
   "name": "mcp-multi-model",
   "version": "3.6.0",
-  "description": "MCP server for parallel multi-model AI queries \u2014 DeepSeek, Gemini, Kimi, Ollama, and any OpenAI-compatible API",
+  "description": "Give Claude Code superpowers \u2014 image/video generation, web search, smart routing across DeepSeek, Gemini, Kimi, and any OpenAI-compatible API",
   "main": "index.js",
   "bin": {
     "mcp-multi-model": "index.js"
@@ -23,7 +23,16 @@
     "model-context-protocol",
     "ollama",
     "local-llm",
-    "lm-studio"
+    "lm-studio",
+    "image-generation",
+    "video-generation",
+    "smart-routing",
+    "web-search",
+    "multi-provider",
+    "claude",
+    "anthropic",
+    "veo",
+    "imagen"
   ],
   "author": "K1vin1906",
   "license": "MIT",
