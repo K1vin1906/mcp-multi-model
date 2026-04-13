@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "mcp-multi-model",
   "display_name": "Multi-Model MCP",
-  "version": "3.5.0",
-  "description": "Query DeepSeek, Gemini, Kimi, OpenAI, Grok, Qwen, GLM and more from Claude in parallel — compare answers and leverage each model's strengths.",
-  "long_description": "## Multi-Model MCP\n\nAn MCP server that lets Claude query multiple AI models in parallel and compare their answers side by side. Pre-configured for 9 mainstream providers out of the box — enable any subset by supplying only the API keys you have.\n\n### Supported providers\n\n- **DeepSeek** — code, math, logic, low cost\n- **Google Gemini** — long context, Google Search grounding\n- **Moonshot Kimi** — Chinese web search, real-time info\n- **OpenAI** — GPT-4o / GPT-5 family, mature ecosystem\n- **OpenRouter** — 300+ models through one endpoint\n- **Perplexity** — Sonar models with built-in web search & citations\n- **xAI Grok** — real-time X feed, reasoning\n- **Qwen (Alibaba DashScope)** — strong Chinese, stable domestic access\n- **GLM (Zhipu AI)** — agentic tool use, long text\n\nNeed more? Add **any OpenAI-compatible endpoint** (Ollama, LM Studio, vLLM, Mistral, Groq, etc.) by editing `config.yaml` after install — no code changes needed.\n\n### Highlights\n\n- **Parallel queries** — ask one question, get answers from all configured models\n- **Unified `ask_ai` tool** — one entry point with per-call `temperature` / `top_p` control\n- **Streaming output** — real-time SSE streaming\n- **Conversation history** — multi-turn context via `conversation_id`\n- **Image generation** — Gemini Nano Banana via `generate_image`\n- **Video generation** — Gemini Veo via `generate_video`\n- **Web search** — Kimi web search, Gemini Google Search grounding, Perplexity citations\n- **Cost tracking** — per-call token usage and cost estimation\n- **Auto-retry & fallback** — exponential backoff + fallback to backup model\n- **Health check** — ping all models, report status/latency\n- **Daily budget limit** — configurable spending cap\n- **Local models** — Ollama, LM Studio, llama.cpp via OpenAI-compatible adapter\n\n### Getting started\n\nProvide at least one API key below. Any provider whose key you leave empty will be automatically skipped at startup. You can always add more models later by editing `config.yaml` inside the extension directory.",
+  "version": "3.6.0",
+  "description": "Query OpenAI, Gemini, Grok, DeepSeek, Mistral, Groq and more from Claude in parallel — compare answers and leverage each model's strengths.",
+  "long_description": "## Multi-Model MCP\n\nAn MCP server that lets Claude query multiple AI models in parallel and compare their answers side by side. Pre-configured for 12 mainstream providers out of the box — enable any subset by supplying only the API keys you have.\n\n### Supported providers\n\n- **OpenAI** — GPT-4o / GPT-5 family, mature ecosystem\n- **Google Gemini** — long context, Google Search grounding, image & video generation\n- **xAI Grok** — real-time X feed, reasoning\n- **Perplexity** — Sonar models with built-in web search & citations\n- **Mistral** — European leader, fast & efficient\n- **Groq** — ultra-fast inference on open-source models\n- **OpenRouter** — 300+ models through one endpoint\n- **DeepSeek** — code, math, logic, very low cost\n- **Qwen (Alibaba DashScope)** — strong Chinese, stable domestic access\n- **GLM (Zhipu AI)** — agentic tool use, long text\n- **Moonshot Kimi** — Chinese web search, real-time info\n- **Together AI** — open-source model hosting, Llama ecosystem\n\nNeed more? Add **any OpenAI-compatible endpoint** (Ollama, LM Studio, vLLM, etc.) by editing `config.yaml` after install — no code changes needed.\n\n### Highlights\n\n- **Parallel queries** — ask one question, get answers from all configured models\n- **Unified `ask_ai` tool** — one entry point with per-call `temperature` / `top_p` control\n- **Streaming output** — real-time SSE streaming\n- **Conversation history** — multi-turn context via `conversation_id`\n- **Image generation** — Gemini via `generate_image`\n- **Video generation** — Gemini Veo via `generate_video`\n- **Web search** — Kimi web search, Gemini Google Search grounding, Perplexity citations\n- **Cost tracking** — per-call token usage and cost estimation with multi-model summary\n- **Auto-retry & fallback** — exponential backoff + fallback to backup model\n- **Health check** — ping all models, report status/latency\n- **Daily budget limit** — configurable spending cap\n- **Local models** — Ollama, LM Studio, llama.cpp via OpenAI-compatible adapter\n\n### Getting started\n\nProvide at least one API key below. Any provider whose key you leave empty will be automatically skipped at startup. You can always add more models later by editing `config.yaml` inside the extension directory.",
   "author": {
     "name": "K1vin1906",
     "url": "https://github.com/K1vin1906"
@@ -20,20 +20,24 @@
   "keywords": [
     "mcp",
     "multi-model",
-    "deepseek",
-    "gemini",
-    "kimi",
     "openai",
-    "openrouter",
-    "perplexity",
+    "gemini",
     "grok",
+    "perplexity",
+    "mistral",
+    "groq",
+    "openrouter",
+    "deepseek",
     "qwen",
     "glm",
+    "kimi",
+    "together-ai",
     "ollama",
     "parallel",
     "llm",
     "ai",
-    "local-llm"
+    "local-llm",
+    "model-context-protocol"
   ],
   "icon": "icon.png",
   "privacy_policies": [
@@ -48,24 +52,27 @@
         "${__dirname}/index.js"
       ],
       "env": {
-        "DEEPSEEK_API_KEY": "${user_config.deepseek_api_key}",
-        "GEMINI_API_KEY": "${user_config.gemini_api_key}",
-        "KIMI_API_KEY": "${user_config.kimi_api_key}",
         "OPENAI_API_KEY": "${user_config.openai_api_key}",
-        "OPENROUTER_API_KEY": "${user_config.openrouter_api_key}",
-        "PERPLEXITY_API_KEY": "${user_config.perplexity_api_key}",
+        "GEMINI_API_KEY": "${user_config.gemini_api_key}",
         "XAI_API_KEY": "${user_config.xai_api_key}",
+        "PERPLEXITY_API_KEY": "${user_config.perplexity_api_key}",
+        "MISTRAL_API_KEY": "${user_config.mistral_api_key}",
+        "GROQ_API_KEY": "${user_config.groq_api_key}",
+        "OPENROUTER_API_KEY": "${user_config.openrouter_api_key}",
+        "DEEPSEEK_API_KEY": "${user_config.deepseek_api_key}",
         "DASHSCOPE_API_KEY": "${user_config.dashscope_api_key}",
-        "ZHIPUAI_API_KEY": "${user_config.zhipuai_api_key}"
+        "ZHIPUAI_API_KEY": "${user_config.zhipuai_api_key}",
+        "KIMI_API_KEY": "${user_config.kimi_api_key}",
+        "TOGETHER_API_KEY": "${user_config.together_api_key}"
       }
     }
   },
   "tools_generated": true,
   "user_config": {
-    "deepseek_api_key": {
+    "openai_api_key": {
       "type": "string",
-      "title": "DeepSeek API Key",
-      "description": "Code, math, logic. Very low cost. Get yours at https://platform.deepseek.com/api_keys",
+      "title": "OpenAI API Key",
+      "description": "GPT-4o / GPT-5 family. Default model: gpt-4o-mini. Get yours at https://platform.openai.com/api-keys",
       "sensitive": true,
       "required": false
     },
@@ -76,24 +83,10 @@
       "sensitive": true,
       "required": false
     },
-    "kimi_api_key": {
+    "xai_api_key": {
       "type": "string",
-      "title": "Moonshot Kimi API Key",
-      "description": "Chinese web search and real-time info. Get yours at https://platform.moonshot.cn/console/api-keys",
-      "sensitive": true,
-      "required": false
-    },
-    "openai_api_key": {
-      "type": "string",
-      "title": "OpenAI API Key",
-      "description": "GPT-4o / GPT-5 family. Default model: gpt-4o-mini. Get yours at https://platform.openai.com/api-keys",
-      "sensitive": true,
-      "required": false
-    },
-    "openrouter_api_key": {
-      "type": "string",
-      "title": "OpenRouter API Key",
-      "description": "Access 300+ models through one endpoint. Edit config.yaml to switch between them. Get yours at https://openrouter.ai/keys",
+      "title": "xAI Grok API Key",
+      "description": "Real-time X/Twitter info, reasoning. Get yours at https://console.x.ai/",
       "sensitive": true,
       "required": false
     },
@@ -104,10 +97,31 @@
       "sensitive": true,
       "required": false
     },
-    "xai_api_key": {
+    "mistral_api_key": {
       "type": "string",
-      "title": "xAI Grok API Key",
-      "description": "Real-time X/Twitter info, reasoning. Get yours at https://console.x.ai/",
+      "title": "Mistral API Key",
+      "description": "European AI leader. Fast, efficient, strong multilingual. Get yours at https://console.mistral.ai/api-keys",
+      "sensitive": true,
+      "required": false
+    },
+    "groq_api_key": {
+      "type": "string",
+      "title": "Groq API Key",
+      "description": "Ultra-fast inference on Llama, Mixtral and more. Get yours at https://console.groq.com/keys",
+      "sensitive": true,
+      "required": false
+    },
+    "openrouter_api_key": {
+      "type": "string",
+      "title": "OpenRouter API Key",
+      "description": "Access 300+ models through one endpoint. Edit config.yaml to switch between them. Get yours at https://openrouter.ai/keys",
+      "sensitive": true,
+      "required": false
+    },
+    "deepseek_api_key": {
+      "type": "string",
+      "title": "DeepSeek API Key",
+      "description": "Code, math, logic. Very low cost. Get yours at https://platform.deepseek.com/api_keys",
       "sensitive": true,
       "required": false
     },
@@ -122,6 +136,20 @@
       "type": "string",
       "title": "GLM (Zhipu AI) API Key",
       "description": "Zhipu AI's GLM models. Agentic tool use, long text. Get yours at https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
+      "sensitive": true,
+      "required": false
+    },
+    "kimi_api_key": {
+      "type": "string",
+      "title": "Moonshot Kimi API Key",
+      "description": "Chinese web search and real-time info. Get yours at https://platform.moonshot.cn/console/api-keys",
+      "sensitive": true,
+      "required": false
+    },
+    "together_api_key": {
+      "type": "string",
+      "title": "Together AI API Key",
+      "description": "Open-source model hosting. Llama, Mixtral, Qwen and more. Get yours at https://api.together.ai/settings/api-keys",
       "sensitive": true,
       "required": false
     }

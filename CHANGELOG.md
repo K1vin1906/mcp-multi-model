@@ -2,6 +2,18 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [3.6.0] - 2026-04-13
+
+### Added
+- **Startup version check** — async check against npm registry on startup; notifies via stderr when a newer version is available (`📦 Update available: vX → vY`). Non-blocking, fails silently if offline.
+- **Multi-model cost summary** — `ask_all` and `ask_both` now append a `📊` summary line showing models called, total tokens, and per-model + total cost breakdown.
+- **3 new providers** — Mistral, Groq, Together AI added to manifest and config template (12 providers total).
+- **Provider reorder** — manifest `user_config` and config template sorted by global popularity: OpenAI → Gemini → Grok → Perplexity → Mistral → Groq → OpenRouter → DeepSeek → Qwen → GLM → Kimi → Together AI.
+
+### Changed
+- **New icon** — bright hub-and-spoke design on white background; high contrast at small sizes (replaces dark cosmic icon that was invisible in Claude Desktop tool buttons).
+- **Version string from package.json** — `PKG_VERSION` read once at startup, eliminates hardcoded version in 2 places (`McpServer` constructor + startup banner).
+
 ## [3.5.0] - 2026-04-10
 
 ### Added

@@ -11,50 +11,6 @@ defaults:
   # daily_budget_usd: 5.0  # Daily spending limit in USD (omit = unlimited)
 
 models:
-  # ── DeepSeek ──
-  deepseek:
-    name: DeepSeek
-    adapter: openai
-    endpoint: https://api.deepseek.com/chat/completions
-    api_key_env: DEEPSEEK_API_KEY
-    model: deepseek-chat
-    description: "向 DeepSeek 发送请求。擅长：中文内容、代码、数学、逻辑。成本低。"
-    fallback_to: gemini
-    pricing:
-      input: 0.14    # $/M tokens
-      output: 0.28
-
-  # ── Google Gemini ──
-  gemini:
-    name: Gemini
-    adapter: gemini
-    endpoint: https://generativelanguage.googleapis.com/v1beta
-    api_key_env: GEMINI_API_KEY
-    model: gemini-3-flash-preview
-    description: "向 Gemini 发送请求。擅长：长文档、知识广度、创意写作。已启用 Google Search 联网。"
-    fallback_to: deepseek
-    features:
-      - google_search
-    pricing:
-      input: 0.10
-      output: 0.40
-
-  # ── Moonshot Kimi ──
-  kimi:
-    name: Kimi
-    adapter: openai
-    endpoint: https://api.moonshot.cn/v1/chat/completions
-    api_key_env: KIMI_API_KEY
-    model: moonshot-v1-auto
-    description: "向 Kimi (Moonshot) 发送请求。擅长：中文联网搜索、实时信息、国内资讯。"
-    system_prefix: "你是 Kimi，擅长联网搜索。当用户的问题涉及实时信息、最新数据、当前时间日期等内容时，请主动使用联网搜索工具获取最新结果。"
-    features:
-      - web_search
-    tool_loop_max: 5
-    pricing:
-      input: 1.00
-      output: 1.00
-
   # ── OpenAI (GPT) ──
   openai:
     name: OpenAI
@@ -67,17 +23,32 @@ models:
       input: 0.15    # gpt-4o-mini
       output: 0.60
 
-  # ── OpenRouter (聚合多家模型) ──
-  openrouter:
-    name: OpenRouter
-    adapter: openai
-    endpoint: https://openrouter.ai/api/v1/chat/completions
-    api_key_env: OPENROUTER_API_KEY
-    model: openai/gpt-4o-mini
-    description: "通过 OpenRouter 访问 300+ 模型。model 字段改为 anthropic/claude-3.5-sonnet 等即可切换。"
+  # ── Google Gemini ──
+  gemini:
+    name: Gemini
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: gemini-3-flash-preview
+    description: "向 Gemini 发送请求。擅长：长文档、知识广度、创意写作。已启用 Google Search 联网。"
+    fallback_to: openai
+    features:
+      - google_search
     pricing:
-      input: 0.15
-      output: 0.60
+      input: 0.10
+      output: 0.40
+
+  # ── xAI Grok ──
+  grok:
+    name: Grok
+    adapter: openai
+    endpoint: https://api.x.ai/v1/chat/completions
+    api_key_env: XAI_API_KEY
+    model: grok-3
+    description: "向 xAI Grok 发送请求。擅长：实时 X/Twitter 信息、幽默风格、推理。"
+    pricing:
+      input: 2.00
+      output: 10.00
 
   # ── Perplexity (内置联网) ──
   perplexity:
@@ -91,17 +62,54 @@ models:
       input: 1.00
       output: 1.00
 
-  # ── xAI Grok ──
-  grok:
-    name: Grok
+  # ── Mistral ──
+  mistral:
+    name: Mistral
     adapter: openai
-    endpoint: https://api.x.ai/v1/chat/completions
-    api_key_env: XAI_API_KEY
-    model: grok-3
-    description: "向 xAI Grok 发送请求。擅长：实时 X/Twitter 信息、幽默风格、推理。"
+    endpoint: https://api.mistral.ai/v1/chat/completions
+    api_key_env: MISTRAL_API_KEY
+    model: mistral-small-latest
+    description: "向 Mistral 发送请求。欧洲领先 AI，快速高效，多语言能力强。"
     pricing:
-      input: 2.00
-      output: 10.00
+      input: 0.10
+      output: 0.30
+
+  # ── Groq (超快推理) ──
+  groq:
+    name: Groq
+    adapter: openai
+    endpoint: https://api.groq.com/openai/v1/chat/completions
+    api_key_env: GROQ_API_KEY
+    model: llama-3.3-70b-versatile
+    description: "通过 Groq 超快推理引擎运行开源模型。延迟极低。"
+    pricing:
+      input: 0.59
+      output: 0.79
+
+  # ── OpenRouter (聚合多家模型) ──
+  openrouter:
+    name: OpenRouter
+    adapter: openai
+    endpoint: https://openrouter.ai/api/v1/chat/completions
+    api_key_env: OPENROUTER_API_KEY
+    model: openai/gpt-4o-mini
+    description: "通过 OpenRouter 访问 300+ 模型。model 字段改为 anthropic/claude-3.5-sonnet 等即可切换。"
+    pricing:
+      input: 0.15
+      output: 0.60
+
+  # ── DeepSeek ──
+  deepseek:
+    name: DeepSeek
+    adapter: openai
+    endpoint: https://api.deepseek.com/chat/completions
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+    description: "向 DeepSeek 发送请求。擅长：中文内容、代码、数学、逻辑。成本低。"
+    fallback_to: gemini
+    pricing:
+      input: 0.14    # $/M tokens
+      output: 0.28
 
   # ── Qwen (阿里通义千问) ──
   qwen:
@@ -127,7 +135,35 @@ models:
       input: 0.50
       output: 0.50
 
-  # ── Image generation (Gemini Nano Banana) ──
+  # ── Moonshot Kimi ──
+  kimi:
+    name: Kimi
+    adapter: openai
+    endpoint: https://api.moonshot.cn/v1/chat/completions
+    api_key_env: KIMI_API_KEY
+    model: moonshot-v1-auto
+    description: "向 Kimi (Moonshot) 发送请求。擅长：中文联网搜索、实时信息、国内资讯。"
+    system_prefix: "你是 Kimi，擅长联网搜索。当用户的问题涉及实时信息、最新数据、当前时间日期等内容时，请主动使用联网搜索工具获取最新结果。"
+    features:
+      - web_search
+    tool_loop_max: 5
+    pricing:
+      input: 1.00
+      output: 1.00
+
+  # ── Together AI ──
+  together:
+    name: Together AI
+    adapter: openai
+    endpoint: https://api.together.xyz/v1/chat/completions
+    api_key_env: TOGETHER_API_KEY
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+    description: "通过 Together AI 运行开源模型。Llama、Mixtral、Qwen 等均可用。"
+    pricing:
+      input: 0.88
+      output: 0.88
+
+  # ── Image generation (Gemini) ──
   # Uses the same GEMINI_API_KEY. Uncomment to enable generate_image tool.
   #
   # gemini-image:

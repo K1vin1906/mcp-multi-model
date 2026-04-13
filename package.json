@@ -1,7 +1,7 @@
 {
   "name": "mcp-multi-model",
-  "version": "3.5.0",
-  "description": "MCP server for parallel multi-model AI queries — DeepSeek, Gemini, Kimi, Ollama, and any OpenAI-compatible API",
+  "version": "3.6.0",
+  "description": "MCP server for parallel multi-model AI queries \u2014 DeepSeek, Gemini, Kimi, Ollama, and any OpenAI-compatible API",
   "main": "index.js",
   "bin": {
     "mcp-multi-model": "index.js"

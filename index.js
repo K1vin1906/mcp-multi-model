@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PKG_VERSION = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf-8")).version;
 
 // ── 加载 .env ──
 try {
@@ -97,15 +98,18 @@ function checkBudget() {
 
 // ── API key 申请链接 ──
 const API_KEY_URLS = {
-  DEEPSEEK_API_KEY: "https://platform.deepseek.com/api_keys",
-  GEMINI_API_KEY: "https://aistudio.google.com/apikey",
-  KIMI_API_KEY: "https://platform.moonshot.cn/console/api-keys",
   OPENAI_API_KEY: "https://platform.openai.com/api-keys",
-  OPENROUTER_API_KEY: "https://openrouter.ai/keys",
-  PERPLEXITY_API_KEY: "https://www.perplexity.ai/settings/api",
+  GEMINI_API_KEY: "https://aistudio.google.com/apikey",
   XAI_API_KEY: "https://console.x.ai/",
+  PERPLEXITY_API_KEY: "https://www.perplexity.ai/settings/api",
+  MISTRAL_API_KEY: "https://console.mistral.ai/api-keys",
+  GROQ_API_KEY: "https://console.groq.com/keys",
+  OPENROUTER_API_KEY: "https://openrouter.ai/keys",
+  DEEPSEEK_API_KEY: "https://platform.deepseek.com/api_keys",
   DASHSCOPE_API_KEY: "https://dashscope.console.aliyun.com/apiKey",
   ZHIPUAI_API_KEY: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
+  KIMI_API_KEY: "https://platform.moonshot.cn/console/api-keys",
+  TOGETHER_API_KEY: "https://api.together.ai/settings/api-keys",
 };
 
 // 解析模型配置
@@ -585,8 +589,25 @@ function fmt(name, r) {
   return `━━━ ${name} (${r.model}) ━━━\n${r.content}\n[tokens: ${r.tokens.prompt} in → ${r.tokens.completion} out, total ${r.tokens.total} | ${sec}s${costStr}]`;
 }
 
+function costSummary(results, keys) {
+  const items = [];
+  let totalCost = 0;
+  let totalTokens = 0;
+  for (let i = 0; i < results.length; i++) {
+    if (results[i].status !== "fulfilled") continue;
+    const r = results[i].value;
+    const name = models[keys[i]]?.name || keys[i];
+    totalCost += r.cost_usd || 0;
+    totalTokens += r.tokens?.total || 0;
+    if (r.cost_usd > 0) items.push(`${name} $${r.cost_usd.toFixed(6)}`);
+  }
+  const count = results.filter(r => r.status === "fulfilled").length;
+  const costLine = items.length ? items.join(" + ") + ` = $${totalCost.toFixed(6)}` : "no cost data";
+  return `\n📊 ${count} models called | ${totalTokens} tokens | ${costLine}`;
+}
+
 // ── MCP Server ──
-const server = new McpServer({ name: "mcp-multi-model", version: "3.5.0" }, { capabilities: { logging: {} } });
+const server = new McpServer({ name: "mcp-multi-model", version: PKG_VERSION }, { capabilities: { logging: {} } });
 
 // 动态注册每个模型的 ask_{key} 工具
 for (const [key, cfg] of Object.entries(models)) {
@@ -679,6 +700,7 @@ if (modelKeys.length >= 2) {
         ? fmt(models[modelKeys[i]].name, r.value)
         : `━━━ ${models[modelKeys[i]].name} 错误 ━━━\n${r.reason?.message}`
     );
+    parts.push(costSummary(results, modelKeys));
     return { content: [{ type: "text", text: parts.join("\n\n" + "═".repeat(50) + "\n\n") }] };
   });
 }
@@ -698,11 +720,13 @@ if (modelKeys.length >= 2) {
       callModel(model_a, prompt, opts),
       callModel(model_b, prompt, opts),
     ]);
+    const keys = [model_a, model_b];
     const names = [models[model_a]?.name || model_a, models[model_b]?.name || model_b];
     const parts = [];
     parts.push(results[0].status === "fulfilled" ? fmt(names[0], results[0].value) : `━━━ ${names[0]} 错误 ━━━\n${results[0].reason?.message}`);
     parts.push("\n" + "═".repeat(50) + "\n");
     parts.push(results[1].status === "fulfilled" ? fmt(names[1], results[1].value) : `━━━ ${names[1]} 错误 ━━━\n${results[1].reason?.message}`);
+    parts.push(costSummary(results, keys));
     return { content: [{ type: "text", text: parts.join("\n") }] };
   });
 }
@@ -913,10 +937,27 @@ if (vidGenCfg && models[vidGenCfg.model]) {
   });
 }
 
+// ── 版本更新检查（异步，不阻塞启动） ──
+async function checkForUpdate() {
+  try {
+    const res = await fetch("https://registry.npmjs.org/mcp-multi-model/latest", {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return;
+    const { version: latest } = await res.json();
+    if (latest && latest !== PKG_VERSION) {
+      const msg = `\n📦 Update available: v${PKG_VERSION} → v${latest}\n   Run: npx mcp-multi-model@latest\n`;
+      console.error(msg);
+      try { await server.sendLoggingMessage({ level: "info", data: msg }); } catch {}
+    }
+  } catch {}
+}
+
 // ── 启动 ──
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`🚀 MCP Multi-Model Server v3.5.0 (${modelKeys.map(k => models[k].name).join(" + ")})`);
+console.error(`🚀 MCP Multi-Model Server v${PKG_VERSION} (${modelKeys.map(k => models[k].name).join(" + ")})`);
+checkForUpdate();
 
 // ── 启动提示：缺失 API key ──
 if (skippedModels.length > 0) {
