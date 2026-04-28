@@ -282,19 +282,58 @@ async function fetchStream(url, options, { agent } = {}) {
 
 // ── 适配器：OpenAI 兼容 ──
 async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history = [], extra = {}) {
+  // Image generation: gpt-image-* / dall-e-* 走 /v1/images/generations,
+  // schema 与 chat completions 不同(无 messages / 无流式)。
+  if (modelCfg.image_generation) {
+    const imgCfg = extra.imageConfig || {};
+    const imgUrl = modelCfg.endpoint.replace(/\/chat\/completions$/, "/images/generations");
+    const imgBody = {
+      model: modelCfg.model,
+      prompt,
+      n: imgCfg.n || 1,
+      size: imgCfg.size || modelCfg.default_size || "1024x1024",
+      quality: imgCfg.quality || modelCfg.default_quality || "medium",
+    };
+    const data = await fetchWithRetry(imgUrl,
+      { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${modelCfg.apiKey}` }, body: JSON.stringify(imgBody) },
+      { agent: modelCfg.key }
+    );
+    const items = data.data || [];
+    const images = items.map(it => ({ mimeType: "image/png", data: it.b64_json }));
+    const usage = data.usage || {};
+    return {
+      content: `Generated ${images.length} image(s)`,
+      images,
+      model: modelCfg.model,
+      tokens: {
+        prompt: usage.input_tokens || 0,
+        completion: usage.output_tokens || 0,
+        total: usage.total_tokens || 0,
+      },
+    };
+  }
+
   const messages = [];
   const sysParts = [modelCfg.system_prefix, systemPrompt].filter(Boolean).join("\n\n");
   if (sysParts) messages.push({ role: "system", content: sysParts });
   if (history.length) messages.push(...history);
   messages.push({ role: "user", content: prompt });
 
+  // OpenAI GPT-5 / o1 / o3 / o4 系列要求 max_completion_tokens,旧 max_tokens 不支持。
+  // DeepSeek / Kimi 仍用 max_tokens。按 model 名前缀分支。
+  const useNewTokenParam = /^(gpt-5|o1-|o3-|o4-)/.test(modelCfg.model);
+  // OpenAI reasoning models (GPT-5.5 旗舰 / o1 / o3 / o4) 只支持 temperature=1,
+  // 自定义会 400 报错。GPT-5.4-mini 等非 reasoning model 不受限。
+  const isReasoningModel = /^(gpt-5\.5|o1-|o3-|o4-)/.test(modelCfg.model);
   const reqBody = {
     model: modelCfg.model,
     messages,
-    max_tokens: maxTokens,
-    temperature: extra.temperature ?? modelCfg.temperature ?? DEFAULT_TEMP,
+    [useNewTokenParam ? 'max_completion_tokens' : 'max_tokens']: maxTokens,
   };
-  if (extra.topP != null) reqBody.top_p = extra.topP;
+  if (!isReasoningModel) {
+    reqBody.temperature = extra.temperature ?? modelCfg.temperature ?? DEFAULT_TEMP;
+    if (extra.topP != null) reqBody.top_p = extra.topP;
+  }
 
   const features = modelCfg.features || [];
   const hasToolLoop = features.includes("web_search");
@@ -385,10 +424,42 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
     body.systemInstruction = { parts: [{ text: systemPrompt }] };
   }
 
-  // Image generation: non-streaming, responseModalities + imageConfig
+  // Image generation: 区分两套 API
+  // - Imagen 系列 (imagen-*) 走 :predict + instances/parameters
+  // - Gemini 原生图像 (gemini-*-image-*) 走 :generateContent + responseModalities
   if (modelCfg.image_generation) {
-    body.generationConfig.responseModalities = ["TEXT", "IMAGE"];
+    const isImagenAPI = /^imagen-/.test(modelCfg.model);
     const imgCfg = extra.imageConfig || {};
+
+    if (isImagenAPI) {
+      const predictBody = {
+        instances: [{ prompt }],
+        parameters: {
+          sampleCount: imgCfg.sampleCount || 1,
+          ...(imgCfg.aspectRatio && { aspectRatio: imgCfg.aspectRatio }),
+          ...(imgCfg.personGeneration && { personGeneration: imgCfg.personGeneration }),
+        },
+      };
+      const url = `${modelCfg.endpoint}/models/${modelCfg.model}:predict?key=${modelCfg.apiKey}`;
+      const data = await fetchWithRetry(url,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(predictBody) },
+        { agent: modelCfg.key }
+      );
+      const predictions = data.predictions || [];
+      const images = predictions.map(p => ({
+        mimeType: p.mimeType || "image/png",
+        data: p.bytesBase64Encoded,
+      }));
+      return {
+        content: `Generated ${images.length} image(s)`,
+        images,
+        model: modelCfg.model,
+        tokens: { prompt: 0, completion: 0, total: 0 },
+      };
+    }
+
+    // Gemini 原生图像（responseModalities 路径）
+    body.generationConfig.responseModalities = ["TEXT", "IMAGE"];
     if (Object.keys(imgCfg).length) body.generationConfig.imageConfig = imgCfg;
 
     const url = `${modelCfg.endpoint}/models/${modelCfg.model}:generateContent?key=${modelCfg.apiKey}`;
