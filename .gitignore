@@ -13,3 +13,6 @@ zhihu-*.png
 
 # Built MCPB packages (distribution artifact, not source)
 *.mcpb
+
+# Local backups from symlink switches (keep ~1 week then delete)
+*.bak.*
