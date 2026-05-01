@@ -1,7 +1,7 @@
 {
   "name": "mcp-multi-model",
   "version": "3.6.2",
-  "description": "Give Claude Code superpowers — image/video generation, web search, smart routing across DeepSeek, Gemini, Kimi, and any OpenAI-compatible API",
+  "description": "Give Claude Code superpowers — parallel multi-model queries, smart routing, and image/video generation across OpenAI (GPT-5, o-series, GPT Image), Gemini (Imagen 4, Veo, Nano Banana), DeepSeek, Kimi, Grok, and 12+ providers",
   "main": "index.js",
   "bin": {
     "mcp-multi-model": "index.js"
@@ -16,9 +16,16 @@
     "multi-model",
     "llm",
     "ai",
+    "openai",
+    "gpt-5",
+    "gpt-image",
+    "reasoning",
+    "o-series",
     "deepseek",
     "gemini",
     "kimi",
+    "grok",
+    "perplexity",
     "claude-code",
     "model-context-protocol",
     "ollama",
@@ -32,7 +39,8 @@
     "claude",
     "anthropic",
     "veo",
-    "imagen"
+    "imagen",
+    "nano-banana"
   ],
   "author": "K1vin1906",
   "license": "MIT",

@@ -20,14 +20,15 @@ npx mcp-multi-model
 
 > "Generate a macOS app icon with a glowing indigo orb"
 
-Claude calls Gemini Imagen, saves the PNG, and opens it. No browser, no Figma, no context switch.
+Claude calls **Imagen 4 / GPT Image / Nano Banana**, saves the PNG, and opens it. No browser, no Figma, no context switch.
 
-Video too — Gemini Veo generates short clips from a text prompt.
+Video too — **Veo 3.1** generates short clips from a text prompt.
 
 ### 🧠 Smart routing — the right model for the job
 
+Need reasoning / agentic coding → it routes to **OpenAI GPT-5 / o-series** (auto-handles `max_completion_tokens`, skips `temperature` where unsupported).
 Tell Claude to research something → it routes to **Gemini** (Google Search grounding).
-Ask it to write code → it routes to **DeepSeek** (fast, cheap, great at code).
+Ask it to write code cheaply → it routes to **DeepSeek** (fast, cheap, great at code).
 Need real-time info in Chinese → it routes to **Kimi** (web search).
 
 You don't pick the model. The routing does it for you.
@@ -65,16 +66,21 @@ That's it. No git clone, no build step.
 
 ## Supported Models
 
-Works with any OpenAI-compatible API or Google Gemini API:
+12+ providers preconfigured in `config.example.yaml`. Models without an API key are skipped automatically.
 
-| Model | Adapter | Why use it |
-|-------|---------|------------|
-| DeepSeek | `openai` | Code, math, logic — extremely low cost |
-| Gemini | `gemini` | Long context, broad knowledge, Google Search |
-| Kimi (Moonshot) | `openai` | Chinese web search, real-time info |
-| **Ollama / LM Studio / llama.cpp** | `openai` | **Local — no API key, no cost, full privacy** |
+| Provider | Adapter | Why use it |
+|---|---|---|
+| **OpenAI** | `openai` | GPT-5 / GPT-5.5 reasoning, o1 / o3 / o4 series, GPT Image. Reasoning param handling is automatic (`max_completion_tokens`, temperature skipped where unsupported). |
+| **Gemini** | `gemini` | Long context, Google Search grounding. Image (Imagen 4 Fast / Ultra, Nano Banana 2) and video (Veo 3.1) generation built in. |
+| **DeepSeek** | `openai` | Code, math, logic — extremely low cost |
+| **Kimi** (Moonshot) | `openai` | Chinese web search, real-time info, tool-calling loop |
+| **Grok** (xAI) | `openai` | Real-time X/Twitter context, reasoning |
+| **Perplexity** | `openai` | Sonar models with built-in web search and citations |
+| **Anthropic** (via OpenRouter) | `openai` | Claude models routed through OpenRouter |
+| **Mistral / Groq / Qwen / GLM / Together** | `openai` | EU AI, ultra-fast inference, Chinese-native, open-source aggregators |
+| **Ollama / LM Studio / llama.cpp / vLLM** | `openai` | **Local — no API key, no cost, full privacy** |
 
-Add more models (GPT-4o, Qwen, Yi, Mistral, etc.) by editing `config.yaml`.
+Adding a new model is one block in `config.yaml` — see [Configuration](#configuration).
 
 ## MCP Tools
 
@@ -191,25 +197,34 @@ models:
 
 ## Image Generation
 
-Generate images using Gemini Imagen models. Uses the same `GEMINI_API_KEY`.
+Two endpoint families are routed automatically based on the model ID:
 
-| Model ID | Speed | Free RPM |
-|----------|-------|----------|
-| `gemini-2.5-flash-image` | Fast (~3s) | 2,000 |
-| `gemini-3.1-flash-image-preview` | Medium (~5s) | 500 |
-| `gemini-3-pro-image-preview` | Slow (~10s) | 500 |
+### Gemini family (uses `GEMINI_API_KEY`)
 
-Supports `aspect_ratio`: `1:1`, `3:2`, `4:3`, `16:9`, `9:16`.
+| Model ID | Endpoint | Notes |
+|---|---|---|
+| `imagen-4-fast` | `:predict` | Default, ~$0.02/image |
+| `imagen-4-ultra` | `:predict` | 2K quality, ~$0.06/image |
+| `gemini-2.5-flash-image` (Nano Banana) | `:generateContent` | Fast (~3s), 2,000 RPM free tier |
+| `gemini-3-pro-image-preview` (Nano Banana 2) | `:generateContent` | High quality, 500 RPM |
+
+### OpenAI family (uses `OPENAI_API_KEY`)
+
+| Model ID | Endpoint | Notes |
+|---|---|---|
+| `gpt-image-2` | `/v1/images/generations` | Best text rendering. Requires OpenAI org verification. |
+
+Supports `aspect_ratio`: `1:1`, `3:2`, `4:3`, `16:9`, `9:16`. `quality` and `size` forwarded to OpenAI image endpoints.
 
 ## Video Generation
 
-Generate short video clips using Gemini Veo models.
+Generate short video clips using Gemini **Veo 3.1** (uses `GEMINI_API_KEY`).
 
 | Parameter | Type | Notes |
 |-----------|------|-------|
 | `prompt` | string | Text description of the desired video |
 | `aspect_ratio` | `16:9` / `9:16` / `1:1` | |
-| `duration` | `4` / `6` / `8` (seconds) | Must be even |
+| `duration` | `4` / `6` / `8` (seconds) | Must be even — Veo only accepts even durations |
 | `save_path` | string? | Defaults to `/tmp/mcp-media/videos/` |
 
 ## Local Models
