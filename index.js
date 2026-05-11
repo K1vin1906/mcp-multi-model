@@ -322,9 +322,11 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
   // OpenAI GPT-5 / o1 / o3 / o4 系列要求 max_completion_tokens,旧 max_tokens 不支持。
   // DeepSeek / Kimi 仍用 max_tokens。按 model 名前缀分支。
   const useNewTokenParam = /^(gpt-5|o1-|o3-|o4-)/.test(modelCfg.model);
-  // OpenAI reasoning models (GPT-5.5 旗舰 / o1 / o3 / o4) 只支持 temperature=1,
-  // 自定义会 400 报错。GPT-5.4-mini 等非 reasoning model 不受限。
-  const isReasoningModel = /^(gpt-5\.5|o1-|o3-|o4-)/.test(modelCfg.model);
+  // Reasoning model 通常只支持 temperature=1,自定义会 400 报错。
+  // 优先看 config 的 `reasoning: true` flag(显式声明),fallback 走已知 reasoning 模型名正则。
+  // 已知:OpenAI GPT-5.5 / o1 / o3 / o4,Moonshot Kimi K2.6 等。
+  const isReasoningModel = modelCfg.reasoning === true
+    || /^(gpt-5\.5|o1-|o3-|o4-)/.test(modelCfg.model);
   const reqBody = {
     model: modelCfg.model,
     messages,
@@ -734,10 +736,16 @@ server.tool("ask_ai", `Unified entry point: send a prompt to any configured mode
 });
 
 // check_health — 检查所有模型健康状态
-server.tool("check_health", "Ping all configured models and report online/offline status with latency.", {}, { readOnlyHint: true, openWorldHint: true }, async () => {
+server.tool("check_health", "Ping all configured models and report online/offline status with latency. Generation-only models (image/video) are skipped to avoid wrong endpoint pings and unintended billing.", {}, { readOnlyHint: true, openWorldHint: true }, async () => {
   const results = await Promise.allSettled(
     modelKeys.map(async (key) => {
       const cfg = models[key];
+      // 生成型模型(视频/图像)走专用 endpoint:streamGenerateContent/chat 不接受它们
+      // ping 既会误报 offline 又会真实扣费(图像生成),直接跳过
+      if (cfg.video_generation || cfg.image_generation) {
+        const kind = cfg.video_generation ? "video" : "image";
+        return { key, name: cfg.name, status: "skipped", latency_ms: 0, note: `${kind}-only, not ping-tested` };
+      }
       const adapter = adapters[cfg.adapter];
       const t0 = Date.now();
       try {
@@ -750,16 +758,17 @@ server.tool("check_health", "Ping all configured models and report online/offlin
   );
   const lines = results.map(r => {
     const v = r.status === "fulfilled" ? r.value : { name: "?", status: "error", latency_ms: 0, error: r.reason?.message };
-    const icon = v.status === "online" ? "✅" : "❌";
-    const err = v.error ? ` — ${v.error}` : "";
-    return `${icon} ${v.name}: ${v.status} (${v.latency_ms}ms)${err}`;
+    const icon = v.status === "online" ? "✅" : v.status === "skipped" ? "⏭️ " : "❌";
+    const detail = v.note ? ` — ${v.note}` : v.error ? ` — ${v.error}` : "";
+    const latency = v.status === "skipped" ? "" : ` (${v.latency_ms}ms)`;
+    return `${icon} ${v.name}: ${v.status}${latency}${detail}`;
   });
   return { content: [{ type: "text", text: lines.join("\n") }] };
 });
 
 // ask_all — 并行调用所有模型
 if (modelKeys.length >= 2) {
-  server.tool("ask_all", `并行请求 ${modelKeys.map(k => models[k].name).join("、")}，返回对比结果。`, {
+  server.tool("ask_all", `Query all configured models in parallel and return side-by-side comparison (并行查询所有配置模型,返回对比结果). Models: ${modelKeys.map(k => models[k].name).join(", ")}.`, {
     prompt: z.string().describe("通用提示词"),
     system_prompt: z.string().optional().describe("共用系统提示词"),
     conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
@@ -781,7 +790,7 @@ if (modelKeys.length >= 2) {
 // ask_both — 并行调用任意两个模型
 if (modelKeys.length >= 2) {
   const modelEnum = z.enum(modelKeys);
-  server.tool("ask_both", "并行请求两个模型，返回对比结果。", {
+  server.tool("ask_both", "Query two specified models in parallel and return side-by-side comparison (并行查询两个指定模型,返回对比结果).", {
     prompt: z.string().describe("通用提示词"),
     model_a: modelEnum.optional().default(modelKeys[0]).describe("第一个模型"),
     model_b: modelEnum.optional().default(modelKeys[1]).describe("第二个模型"),

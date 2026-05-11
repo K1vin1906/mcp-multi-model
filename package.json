@@ -1,6 +1,6 @@
 {
   "name": "mcp-multi-model",
-  "version": "3.6.5",
+  "version": "3.6.6",
   "description": "Give Claude Code superpowers — parallel multi-model queries, smart routing, and image/video generation across OpenAI (GPT-5, o-series, GPT Image), Gemini (Imagen 4, Veo, Nano Banana), DeepSeek, Kimi, Grok, and 12+ providers",
   "main": "index.js",
   "bin": {

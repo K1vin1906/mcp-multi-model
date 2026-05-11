@@ -2,6 +2,15 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [3.6.6] - 2026-05-11
+
+### Fixed
+- **Kimi K2.6 `invalid temperature: only 1 is allowed`** — K2.6 是 reasoning 模型,Moonshot API 拒绝 temperature ≠ 1。新增通用 config 字段 `reasoning: true`,让 server 跳过自动设 temperature;canonical 与 example 的 `kimi_k26` 已启用。原有正则 `(gpt-5\.5|o1-|o3-|o4-)` 作 fallback,未来新增 reasoning 模型直接改 config 不动代码。
+- **`check_health` 把视频/图像生成模型当 chat 模型 ping 导致 (a) 视频模型必报 offline,(b) 图像模型真实扣费** — Veo / Imagen / Nano Banana / GPT Image 等模型走专用 endpoint(`:predictLongRunning` / `:predict`),check_health 通用 ping 走 `:streamGenerateContent` / `chat/completions` 不仅会报错,图像类还会真实产出图片并计费。现在带 `video_generation` / `image_generation` flag 的模型在 check_health 中标 `skipped`(⏭️ icon)而非 online/offline。
+
+### Changed
+- **`ask_all` / `ask_both` description 双语化** — 原中文描述让 ToolSearch 的英文关键词 `ask_all` / `all models` / `parallel` 命中率低,影响其他 Claude(尤其桌面端)的工具发现。改为英文为主 + 中文括注。
+
 ## [3.6.5] - 2026-05-11
 
 ### Fixed

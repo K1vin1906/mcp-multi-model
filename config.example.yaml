@@ -208,6 +208,7 @@ models:
     api_key_env: KIMI_API_KEY
     model: kimi-k2.6
     description: "Kimi K2.6 (备用,多模态)。256K context,支持图/视频/PDF 输入,thinking 模式。联网搜索能力与 v1 相当。"
+    reasoning: true   # K2.6 是 reasoning 模型,API 只接受 temperature=1,本 flag 让 server 跳过自动设 temperature
     features:
       - web_search
     tool_loop_max: 5
