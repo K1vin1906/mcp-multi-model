@@ -1,214 +1,251 @@
-# mcp-multi-model 配置文件
-# 添加新模型只需在 models 下新增一项，支持 openai / gemini 两种 adapter
-# 未设置对应 api_key 的模型会在启动时自动跳过，所以这里可以把所有主流模型都预置好
+# mcp-multi-model 配置文件示例
+# 复制为 config.yaml 后,把对应 *_API_KEY 写到 .env 即可启动。未配 key 的模型启动时自动跳过。
+# 模型清单与 README 对齐 (DeepSeek V4 / Gemini 3.x / OpenAI GPT-5.x / Imagen 4 / Veo 3.x);如需新增模型,在 models 下加一条即可。
 
 defaults:
   max_tokens: 4000
   temperature: 0.7
   timeout_ms: 60000
   max_retries: 2
-  # cache_ttl_ms: 300000   # Cache identical prompts for 5 minutes (0 = disabled)
-  # daily_budget_usd: 5.0  # Daily spending limit in USD (omit = unlimited)
 
 models:
-  # ── OpenAI (GPT) ──
+  # === DeepSeek V4 ===
+  deepseek:
+    name: DeepSeek
+    adapter: openai
+    endpoint: https://api.deepseek.com/chat/completions
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-v4-flash
+    description: "DeepSeek V4 Flash 默认入口。1M context,擅长代码+中文+数学逻辑,成本极低。"
+    pricing:
+      input: 0.14    # ¥1/M ≈ $0.14
+      output: 0.29   # ¥2/M ≈ $0.29
+
+  deepseek-pro:
+    name: DeepSeek Pro
+    adapter: openai
+    endpoint: https://api.deepseek.com/chat/completions
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-v4-pro
+    description: "DeepSeek V4 Pro 高难度推理。1M context,支持思考模式。"
+    pricing:
+      input: 0.43
+      output: 0.86
+
+  # === OpenAI GPT-5.x ===
   openai:
     name: OpenAI
     adapter: openai
     endpoint: https://api.openai.com/v1/chat/completions
     api_key_env: OPENAI_API_KEY
-    model: gpt-4o-mini
-    description: "向 OpenAI GPT 发送请求。通用能力强，生态成熟。默认使用 gpt-4o-mini 节省成本。"
+    model: gpt-5.4-mini
+    description: "GPT-5.4 mini 默认 OpenAI 入口。便宜快,ask_all 第 4 视角识别其他模型偏置。"
     pricing:
-      input: 0.15    # gpt-4o-mini
-      output: 0.60
+      input: 0.75
+      output: 4.50
 
-  # ── Google Gemini ──
+  openai-pro:
+    name: OpenAI Pro
+    adapter: openai
+    endpoint: https://api.openai.com/v1/chat/completions
+    api_key_env: OPENAI_API_KEY
+    model: gpt-5.5
+    description: "GPT-5.5 旗舰,复杂 reasoning / agentic coding / 多模态视觉显式调用。"
+    pricing:
+      input: 5.00
+      output: 30.00
+
+  # === Gemini 3.x ===
   gemini:
     name: Gemini
     adapter: gemini
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api_key_env: GEMINI_API_KEY
     model: gemini-3-flash-preview
-    description: "向 Gemini 发送请求。擅长：长文档、知识广度、创意写作。已启用 Google Search 联网。"
-    fallback_to: openai
+    description: "Gemini 3 Flash 默认入口。Google Search 联网,日常调研/创意首选,便宜。"
     features:
       - google_search
     pricing:
-      input: 0.10
-      output: 0.40
+      input: 0.50
+      output: 3.00
 
-  # ── xAI Grok ──
-  grok:
-    name: Grok
-    adapter: openai
-    endpoint: https://api.x.ai/v1/chat/completions
-    api_key_env: XAI_API_KEY
-    model: grok-3
-    description: "向 xAI Grok 发送请求。擅长：实时 X/Twitter 信息、幽默风格、推理。"
+  gemini-pro:
+    name: Gemini Pro
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: gemini-3.1-pro-preview
+    description: "Gemini 3.1 Pro Preview,重要调研 / 深度分析 / 长文档显式调用。Google Search 联网。>200K context 价格 2x。"
+    features:
+      - google_search
     pricing:
       input: 2.00
-      output: 10.00
+      output: 12.00
 
-  # ── Perplexity (内置联网) ──
-  perplexity:
-    name: Perplexity
-    adapter: openai
-    endpoint: https://api.perplexity.ai/chat/completions
-    api_key_env: PERPLEXITY_API_KEY
-    model: sonar
-    description: "向 Perplexity Sonar 发送请求。擅长：联网搜索、实时信息、引用来源。"
+  # === 图像生成 (Imagen 4) ===
+  gemini-image:
+    name: Imagen 4 Fast
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: imagen-4.0-fast-generate-001
+    description: "Imagen 4 Fast 默认图像生成。$0.02/图,1024×1024,SynthID 水印,日常出图。"
+    image_generation: true
     pricing:
-      input: 1.00
-      output: 1.00
+      input: 0.0
+      output: 0.02   # $/image
 
-  # ── Mistral ──
-  mistral:
-    name: Mistral
-    adapter: openai
-    endpoint: https://api.mistral.ai/v1/chat/completions
-    api_key_env: MISTRAL_API_KEY
-    model: mistral-small-latest
-    description: "向 Mistral 发送请求。欧洲领先 AI，快速高效，多语言能力强。"
+  imagen-4-ultra:
+    name: Imagen 4 Ultra
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: imagen-4.0-ultra-generate-001
+    description: "Imagen 4 Ultra 高质量备选。$0.06/图,支持 2K resolution,需要专业出图时显式调。"
+    image_generation: true
     pricing:
-      input: 0.10
-      output: 0.30
+      input: 0.0
+      output: 0.06
 
-  # ── Groq (超快推理) ──
-  groq:
-    name: Groq
-    adapter: openai
-    endpoint: https://api.groq.com/openai/v1/chat/completions
-    api_key_env: GROQ_API_KEY
-    model: llama-3.3-70b-versatile
-    description: "通过 Groq 超快推理引擎运行开源模型。延迟极低。"
+  # === 图像编辑 / 多模态生图 (Gemini 原生 / Nano Banana) ===
+  # 与 Imagen 不同:Nano Banana 是 Gemini 多模态(图像入+图像出),
+  # 真正用武之地是"参考图编辑/迭代修改/与 Gemini 上下文打通"。
+  # 纯 text→image 还是用 Imagen 便宜。
+  nano-banana:
+    name: Nano Banana 2 (Gemini 3.1 Flash Image)
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: gemini-3.1-flash-image-preview
+    description: "Gemini 3.1 Flash Image (Nano Banana 2)。多模态图像编辑首选,支持参考图输入。"
+    image_generation: true
     pricing:
-      input: 0.59
-      output: 0.79
+      input: 0.0
+      output: 0.067   # $/1K image, 4K 时为 0.151
 
-  # ── OpenRouter (聚合多家模型) ──
-  openrouter:
-    name: OpenRouter
-    adapter: openai
-    endpoint: https://openrouter.ai/api/v1/chat/completions
-    api_key_env: OPENROUTER_API_KEY
-    model: openai/gpt-4o-mini
-    description: "通过 OpenRouter 访问 300+ 模型。model 字段改为 anthropic/claude-3.5-sonnet 等即可切换。"
+  nano-banana-pro:
+    name: Nano Banana Pro (Gemini 3 Pro Image)
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: gemini-3-pro-image-preview
+    description: "Gemini 3 Pro Image (Nano Banana Pro)。Pro reasoning + 4K + Gemini 上下文整合。需要旗舰多模态/复杂 prompt 理解时显式调。"
+    image_generation: true
     pricing:
-      input: 0.15
-      output: 0.60
+      input: 0.0
+      output: 0.134   # $/1K image, 4K 时为 0.24
 
-  # ── DeepSeek ──
-  deepseek:
-    name: DeepSeek
+  # === OpenAI GPT Image 2 (备胎,文字渲染/复杂指令理解强项) ===
+  # 用武之地:Imagen 字渲染歪 / 复杂构图理解失败时显式调
+  gpt-image:
+    name: GPT Image 2
     adapter: openai
-    endpoint: https://api.deepseek.com/chat/completions
-    api_key_env: DEEPSEEK_API_KEY
-    model: deepseek-chat
-    description: "向 DeepSeek 发送请求。擅长：中文内容、代码、数学、逻辑。成本低。"
-    fallback_to: gemini
+    endpoint: https://api.openai.com/v1/chat/completions   # 内部 swap 为 /v1/images/generations
+    api_key_env: OPENAI_API_KEY
+    model: gpt-image-2
+    description: "GPT Image 2 medium quality。文字渲染/复杂指令理解优于 Imagen,适合带字海报/复杂构图。"
+    image_generation: true
+    default_quality: medium
+    default_size: "1024x1024"
     pricing:
-      input: 0.14    # $/M tokens
-      output: 0.28
+      input: 0.0
+      output: 0.053   # $/image @ medium 1024x1024
 
-  # ── Qwen (阿里通义千问) ──
-  qwen:
-    name: Qwen
+  gpt-image-hd:
+    name: GPT Image 2 HD
     adapter: openai
-    endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
-    api_key_env: DASHSCOPE_API_KEY
-    model: qwen-plus
-    description: "向通义千问发送请求。擅长：中文语义理解、数学、代码。国内访问稳定。"
+    endpoint: https://api.openai.com/v1/chat/completions
+    api_key_env: OPENAI_API_KEY
+    model: gpt-image-2
+    description: "GPT Image 2 high quality。旗舰图像生成,需要最强文字+构图时显式调。"
+    image_generation: true
+    default_quality: high
+    default_size: "1024x1024"
     pricing:
-      input: 0.40
-      output: 1.20
+      input: 0.0
+      output: 0.211
 
-  # ── GLM (智谱 AI) ──
-  glm:
-    name: GLM
-    adapter: openai
-    endpoint: https://open.bigmodel.cn/api/paas/v4/chat/completions
-    api_key_env: ZHIPUAI_API_KEY
-    model: glm-4-plus
-    description: "向智谱 GLM 发送请求。擅长：中文对话、Agent 工具调用、长文本。"
+  # === 视频生成 (Veo 3.x) ===
+  gemini-video:
+    name: Gemini Video (Veo)
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: veo-3.0-generate-001
+    video_generation: true
+    description: "Google Veo 3.0 stable 视频生成。最长 8 秒(限制为偶数:4/6/8),原生音频。"
     pricing:
-      input: 0.50
-      output: 0.50
+      input: 0.0
+      output: 0.0
 
-  # ── Moonshot Kimi ──
+  # === Kimi (Moonshot) ===
+  # 默认入口 v1-32k:联网搜索场景与 K2.6 拉同一搜索后端,差异主要在多模态/agentic。
+  # 走 .cn 端点(¥ 计价),pricing 按 ¥ ÷ 7.1 折算 USD。
   kimi:
     name: Kimi
     adapter: openai
     endpoint: https://api.moonshot.cn/v1/chat/completions
     api_key_env: KIMI_API_KEY
-    model: moonshot-v1-auto
-    description: "向 Kimi (Moonshot) 发送请求。擅长：中文联网搜索、实时信息、国内资讯。"
-    system_prefix: "你是 Kimi，擅长联网搜索。当用户的问题涉及实时信息、最新数据、当前时间日期等内容时，请主动使用联网搜索工具获取最新结果。"
+    model: moonshot-v1-32k
+    description: "向 Kimi (Moonshot v1-32k) 发送请求。擅长:中文联网搜索、实时信息、国内资讯。"
+    system_prefix: "你是 Kimi,擅长联网搜索。当用户的问题涉及实时信息、最新数据、当前时间日期等内容时,请主动使用联网搜索工具获取最新结果。"
     features:
       - web_search
     tool_loop_max: 5
     pricing:
-      input: 1.00
-      output: 1.00
+      input: 0.70    # ¥5/M ≈ $0.70 (.cn 实际计价)
+      output: 2.82   # ¥20/M ≈ $2.82 (.cn 实际计价)
 
-  # ── Together AI ──
-  together:
-    name: Together AI
+  # K2.6 备用入口 (非默认):
+  # - 多模态(图/视频/PDF)、256K context、thinking 模式
+  # - 注:thinking 与 $web_search 互斥,要联网必须 thinking.type=disabled
+  # - 显式调用: ask_ai(model="kimi_k26", ...) 或 ask_kimi 加参数
+  kimi_k26:
+    name: Kimi K2.6
     adapter: openai
-    endpoint: https://api.together.xyz/v1/chat/completions
-    api_key_env: TOGETHER_API_KEY
-    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-    description: "通过 Together AI 运行开源模型。Llama、Mixtral、Qwen 等均可用。"
+    endpoint: https://api.moonshot.cn/v1/chat/completions
+    api_key_env: KIMI_API_KEY
+    model: kimi-k2.6
+    description: "Kimi K2.6 (备用,多模态)。256K context,支持图/视频/PDF 输入,thinking 模式。联网搜索能力与 v1 相当。"
+    features:
+      - web_search
+    tool_loop_max: 5
     pricing:
-      input: 0.88
-      output: 0.88
+      input: 0.92    # ¥6.50/M cache miss ≈ $0.92 (cache hit ¥1.10/M ≈ $0.155)
+      output: 3.80   # ¥27/M ≈ $3.80
 
-  # ── Image generation (Gemini) ──
-  # Uses the same GEMINI_API_KEY. Uncomment to enable generate_image tool.
-  #
-  # gemini-image:
-  #   name: Gemini Image
-  #   adapter: gemini
-  #   endpoint: https://generativelanguage.googleapis.com/v1beta
-  #   api_key_env: GEMINI_API_KEY
-  #   model: gemini-2.5-flash-image
-  #   description: "Generate images with Gemini 2.5 Flash Image. Fast, low cost."
-  #   image_generation: true
-  #   pricing:
-  #     input: 0.10
-  #     output: 0.40
-
-  # ── Local models (Ollama / LM Studio / llama.cpp) ──
-  # Uncomment and adjust to use local models. No API key needed.
-  #
-  # ollama:
-  #   name: Ollama
-  #   adapter: openai
-  #   endpoint: http://localhost:11434/v1/chat/completions
-  #   model: llama3.2
-  #   description: "Local Ollama model. No API key, no cost, full privacy."
-  #   pricing:
-  #     input: 0
-  #     output: 0
-  #
-  # lmstudio:
-  #   name: LM Studio
-  #   adapter: openai
-  #   endpoint: http://localhost:1234/v1/chat/completions
-  #   model: loaded-model
-  #   description: "Local LM Studio model."
-  #   pricing:
-  #     input: 0
-  #     output: 0
+# 委派路由配置
+routing:
+  fallback: deepseek
+  categories:
+    research:
+      keywords: [调研, 分析, 对比, 竞品, 方案, 综述, 梳理, survey, research, compare, analysis, "pros and cons", review]
+      delegate_to: gemini
+      reason: "Gemini 3 Flash + Google Search 联网,日常调研足够;深度调研显式调 gemini-pro"
+    code:
+      keywords: [算法, 代码, 实现, 函数, 重构, 生成代码, 数学, 推导, 公式, algorithm, implement, code, math, function, refactor]
+      delegate_to: deepseek
+      reason: "DeepSeek V4 Flash 擅长代码与数学,1M context,极低成本;高难度任务显式调 deepseek-pro"
+    realtime:
+      keywords: [最新, 实时, 今天, 最近, 新闻, 热搜, 价格, 天气, 股价, 汇率, current, latest, today, news, price]
+      delegate_to: kimi
+      reason: "Kimi 擅长中文联网搜索,获取国内实时信息"
+    creative:
+      keywords: [写作, 文案, 起名, 标题, slogan, 营销, 故事, creative, writing, copywriting, brainstorm]
+      delegate_to: gemini
+      reason: "Gemini 3 Flash 创意写作能力强"
 
 # 特殊工具配置
 tools:
   translate:
     model: deepseek
-    description: "用 DeepSeek 做中英互译，质量高成本低。"
+    description: "DeepSeek V4 Flash 中英互译,质量高成本低。"
   research:
     model: gemini
-    description: "用 Gemini 做技术调研和分析总结（已联网）。"
-  # generate_image:
-  #   model: gemini-image
-  #   description: "Generate images from text descriptions using Gemini."
+    description: "Gemini 3 Flash 调研(已联网)。"
+  generate_image:
+    model: gemini-image
+    description: "Imagen 4 Fast 默认图像生成($0.02/图)。需要 2K 高质量显式用 imagen-4-ultra。"
+  generate_video:
+    model: gemini-video
+    description: "Veo 3.x 视频生成(异步,最长 8 秒,4/6/8 偶数限制)。"
