@@ -345,8 +345,10 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
   const headers = { "Content-Type": "application/json" };
   if (modelCfg.apiKey) headers.Authorization = `Bearer ${modelCfg.apiKey}`;
 
-  // 有工具循环的模型（如 Kimi web_search）使用非流式
-  if (hasToolLoop) {
+  // 非流式分支:web_search tool loop 或显式 force_non_streaming(如 DeepSeek V4 Pro 思考模式)
+  // 思考模型流式 chunk 只走 delta.reasoning_content,delta.content 长时间空,且 token 易被 reasoning 吃完
+  // 导致最终可见输出为空。强制非流式可正常读 message.content。
+  if (hasToolLoop || modelCfg.force_non_streaming) {
     const fetchOpts = { method: "POST", headers, body: JSON.stringify(reqBody) };
     let data = await fetchWithRetry(modelCfg.endpoint, fetchOpts, { agent: modelCfg.key });
     let choice = data.choices?.[0];

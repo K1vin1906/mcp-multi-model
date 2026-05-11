@@ -28,6 +28,7 @@ models:
     api_key_env: DEEPSEEK_API_KEY
     model: deepseek-v4-pro
     description: "DeepSeek V4 Pro 高难度推理。1M context,支持思考模式。"
+    force_non_streaming: true   # 思考模型流式 delta 只走 reasoning_content,易被 token 预算耗尽导致 content 为空;非流式 message.content 正常
     pricing:
       input: 0.43
       output: 0.86
