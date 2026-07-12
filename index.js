@@ -133,6 +133,44 @@ if (modelKeys.length === 0) {
 }
 console.error(`✅ Loaded ${modelKeys.length} models: ${modelKeys.join(", ")}`);
 
+// chat 模型 vs 生成型(image/video)分组 — ask_all / ask_both 只跑 chat
+const chatModelKeys = modelKeys.filter(k => !models[k].image_generation && !models[k].video_generation);
+const generationModelKeys = modelKeys.filter(k => models[k].image_generation || models[k].video_generation);
+
+// 解析 delegate 路由:每个 category 找到实际可用的 model(优先 delegate_to,缺则走 fallback_chain,再缺回落全局 fallback)
+// resolvedCategoryModels[catName] = { model: key, fromFallback: bool, preferred: originalKey }
+const resolvedCategoryModels = {};
+if (config.routing?.categories) {
+  const globalFallback = config.routing.fallback && models[config.routing.fallback]
+    ? config.routing.fallback
+    : (chatModelKeys[0] || modelKeys[0]);
+  for (const [catName, cat] of Object.entries(config.routing.categories)) {
+    let resolved = null;
+    let fromFallback = false;
+    if (cat.delegate_to && models[cat.delegate_to]) {
+      resolved = cat.delegate_to;
+    } else {
+      for (const candidate of cat.fallback_chain || []) {
+        if (models[candidate]) { resolved = candidate; fromFallback = true; break; }
+      }
+      if (!resolved && models[globalFallback]) { resolved = globalFallback; fromFallback = true; }
+    }
+    if (resolved) {
+      resolvedCategoryModels[catName] = { model: resolved, fromFallback, preferred: cat.delegate_to };
+    }
+  }
+  const routingEntries = Object.entries(resolvedCategoryModels);
+  if (routingEntries.length > 0) {
+    const lines = ["📋 Delegate routing:"];
+    for (const [catName, info] of routingEntries) {
+      const modelName = models[info.model].name;
+      const marker = info.fromFallback ? ` (fallback, ${info.preferred} key missing)` : "";
+      lines.push(`   ${catName} → ${modelName}${marker}`);
+    }
+    console.error(lines.join("\n"));
+  }
+}
+
 // ── Agent Monitor: UDS 事件广播 ──
 const SOCKET_PATH = "/tmp/agent-monitor.sock";
 const monitorClients = new Set();
@@ -766,34 +804,37 @@ server.tool("check_health", "Ping all configured models and report online/offlin
   return { content: [{ type: "text", text: lines.join("\n") }] };
 });
 
-// ask_all — 并行调用所有模型
-if (modelKeys.length >= 2) {
-  server.tool("ask_all", `Query all configured models in parallel and return side-by-side comparison (并行查询所有配置模型,返回对比结果). Models: ${modelKeys.map(k => models[k].name).join(", ")}.`, {
+// ask_all — 并行调用所有 chat 模型 (image/video 生成模型被自动排除,见 generate_image / generate_video)
+if (chatModelKeys.length >= 2) {
+  const genNote = generationModelKeys.length > 0
+    ? ` Image/video models (${generationModelKeys.map(k => models[k].name).join(", ")}) are excluded — use generate_image / generate_video instead.`
+    : "";
+  server.tool("ask_all", `Query all chat models in parallel for cross-model comparison (并行查询所有 chat 模型,返回对比结果). Models: ${chatModelKeys.map(k => models[k].name).join(", ")}.${genNote}`, {
     prompt: z.string().describe("通用提示词"),
     system_prompt: z.string().optional().describe("共用系统提示词"),
     conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
     const results = await Promise.allSettled(
-      modelKeys.map(k => callModel(k, prompt, opts))
+      chatModelKeys.map(k => callModel(k, prompt, opts))
     );
     const parts = results.map((r, i) =>
       r.status === "fulfilled"
-        ? fmt(models[modelKeys[i]].name, r.value)
-        : `━━━ ${models[modelKeys[i]].name} 错误 ━━━\n${r.reason?.message}`
+        ? fmt(models[chatModelKeys[i]].name, r.value)
+        : `━━━ ${models[chatModelKeys[i]].name} 错误 ━━━\n${r.reason?.message}`
     );
-    parts.push(costSummary(results, modelKeys));
+    parts.push(costSummary(results, chatModelKeys));
     return { content: [{ type: "text", text: parts.join("\n\n" + "═".repeat(50) + "\n\n") }] };
   });
 }
 
-// ask_both — 并行调用任意两个模型
-if (modelKeys.length >= 2) {
-  const modelEnum = z.enum(modelKeys);
-  server.tool("ask_both", "Query two specified models in parallel and return side-by-side comparison (并行查询两个指定模型,返回对比结果).", {
+// ask_both — 并行调用任意两个 chat 模型 (image/video 不在 enum 内)
+if (chatModelKeys.length >= 2) {
+  const chatModelEnum = z.enum(chatModelKeys);
+  server.tool("ask_both", "Query two specified chat models in parallel and return side-by-side comparison (并行查询两个指定 chat 模型,返回对比结果). Image/video models excluded — use generate_image / generate_video instead.", {
     prompt: z.string().describe("通用提示词"),
-    model_a: modelEnum.optional().default(modelKeys[0]).describe("第一个模型"),
-    model_b: modelEnum.optional().default(modelKeys[1]).describe("第二个模型"),
+    model_a: chatModelEnum.optional().default(chatModelKeys[0]).describe("第一个 chat 模型"),
+    model_b: chatModelEnum.optional().default(chatModelKeys[1]).describe("第二个 chat 模型"),
     system_prompt: z.string().optional().describe("共用系统提示词"),
     conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, model_a, model_b, system_prompt, conversation_id }) => {
@@ -818,29 +859,39 @@ const routingCfg = config.routing;
 if (routingCfg) {
   const categories = routingCfg.categories || {};
   const categoryNames = Object.keys(categories);
-  const fallbackModel = routingCfg.fallback || modelKeys[0];
+  const fallbackModel = (routingCfg.fallback && models[routingCfg.fallback])
+    ? routingCfg.fallback
+    : (chatModelKeys[0] || modelKeys[0]);
 
   // 关键词匹配：扫描 task 文本，返回 { category, model, reason }
+  // 实际模型从 resolvedCategoryModels 取(已考虑 fallback_chain)
   function routeTask(task, hintCategory) {
-    // 如果有明确的 category hint，直接使用
     if (hintCategory && categories[hintCategory]) {
       const cat = categories[hintCategory];
-      const target = models[cat.delegate_to] ? cat.delegate_to : fallbackModel;
-      return { category: hintCategory, model: target, reason: cat.reason };
+      const info = resolvedCategoryModels[hintCategory];
+      const target = info ? info.model : fallbackModel;
+      const reason = info?.fromFallback
+        ? `${cat.reason} [fallback: ${cat.delegate_to} key missing → ${models[target].name}]`
+        : cat.reason;
+      return { category: hintCategory, model: target, reason };
     }
     // 关键词扫描
     const taskLower = task.toLowerCase();
     let bestMatch = null;
     let bestScore = 0;
     for (const [catName, cat] of Object.entries(categories)) {
-      if (!models[cat.delegate_to]) continue;
+      const info = resolvedCategoryModels[catName];
+      if (!info) continue;
       let score = 0;
       for (const kw of cat.keywords || []) {
         if (taskLower.includes(kw.toLowerCase())) score++;
       }
       if (score > bestScore) {
         bestScore = score;
-        bestMatch = { category: catName, model: cat.delegate_to, reason: cat.reason };
+        const reason = info.fromFallback
+          ? `${cat.reason} [fallback: ${cat.delegate_to} key missing → ${models[info.model].name}]`
+          : cat.reason;
+        bestMatch = { category: catName, model: info.model, reason };
       }
     }
     if (bestMatch) return bestMatch;
@@ -851,7 +902,16 @@ if (routingCfg) {
     ? z.enum([...categoryNames, "auto"]).optional().default("auto")
     : z.string().optional().default("auto");
 
-  server.tool("delegate", "智能委派：根据任务内容自动选择最合适的模型执行。Claude 不想干的活丢过来。", {
+  // 动态构造 description,把 category → 实际模型 映射暴露给 Claude
+  const routingDesc = Object.entries(resolvedCategoryModels)
+    .map(([cat, info]) => `${cat}→${models[info.model].name}${info.fromFallback ? "*" : ""}`)
+    .join(", ");
+  const hasFallback = Object.values(resolvedCategoryModels).some(i => i.fromFallback);
+  const delegateDesc = routingDesc
+    ? `智能委派路由 (Routes: ${routingDesc}${hasFallback ? "; * = fallback due to missing key" : ""}). Claude 不想干的活丢过来。`
+    : "智能委派：根据任务内容自动选择最合适的模型执行。Claude 不想干的活丢过来。";
+
+  server.tool("delegate", delegateDesc, {
     task: z.string().describe("任务描述，详细说明需要做什么"),
     category: categoryEnum.describe(`任务类别提示（${categoryNames.join("/")}），auto 为自动判断`),
     system_prompt: z.string().optional().describe("额外的系统提示词"),

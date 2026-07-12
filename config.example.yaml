@@ -1,6 +1,6 @@
 # mcp-multi-model 配置文件示例
 # 复制为 config.yaml 后,把对应 *_API_KEY 写到 .env 即可启动。未配 key 的模型启动时自动跳过。
-# 模型清单与 README 对齐 (DeepSeek V4 / Gemini 3.x / OpenAI GPT-5.x / Imagen 4 / Veo 3.x);如需新增模型,在 models 下加一条即可。
+# 模型清单与 README 对齐 (DeepSeek V4 / Gemini 3.x / OpenAI GPT-5.6 / Imagen 4 / Veo 3.1);如需新增模型,在 models 下加一条即可。
 
 defaults:
   max_tokens: 4000
@@ -18,8 +18,8 @@ models:
     model: deepseek-v4-flash
     description: "DeepSeek V4 Flash 默认入口。1M context,擅长代码+中文+数学逻辑,成本极低。"
     pricing:
-      input: 0.14    # ¥1/M ≈ $0.14
-      output: 0.29   # ¥2/M ≈ $0.29
+      input: 0.14    # $0.14/M cache miss
+      output: 0.28   # $0.28/M
 
   deepseek-pro:
     name: DeepSeek Pro
@@ -30,28 +30,31 @@ models:
     description: "DeepSeek V4 Pro 高难度推理。1M context,支持思考模式。"
     force_non_streaming: true   # 思考模型流式 delta 只走 reasoning_content,易被 token 预算耗尽导致 content 为空;非流式 message.content 正常
     pricing:
-      input: 0.43
-      output: 0.86
+      input: 0.435   # $0.435/M cache miss
+      output: 0.87   # $0.87/M
 
-  # === OpenAI GPT-5.x ===
+  # === OpenAI GPT-5.6 (2026-07-09 GA,三档:Sol 旗舰 / Terra 中档 / Luna 廉价) ===
+  # ⚠️ 全系锁 temperature=1,必须 reasoning:true(server 对 reasoning 模型跳过 temperature/top_p)。
   openai:
     name: OpenAI
     adapter: openai
     endpoint: https://api.openai.com/v1/chat/completions
     api_key_env: OPENAI_API_KEY
-    model: gpt-5.4-mini
-    description: "GPT-5.4 mini 默认 OpenAI 入口。便宜快,ask_all 第 4 视角识别其他模型偏置。"
+    model: gpt-5.6-luna
+    description: "GPT-5.6 Luna 默认 OpenAI 入口。廉价快速档,ask_all 第 4 视角识别其他模型偏置。"
+    reasoning: true   # GPT-5.6 全系锁 temperature=1,本 flag 让 server 跳过自动设 temperature/top_p
     pricing:
-      input: 0.75
-      output: 4.50
+      input: 1.00
+      output: 6.00
 
   openai-pro:
     name: OpenAI Pro
     adapter: openai
     endpoint: https://api.openai.com/v1/chat/completions
     api_key_env: OPENAI_API_KEY
-    model: gpt-5.5
-    description: "GPT-5.5 旗舰,复杂 reasoning / agentic coding / 多模态视觉显式调用。"
+    model: gpt-5.6-sol
+    description: "GPT-5.6 Sol 旗舰。复杂 reasoning / agentic coding / 多模态视觉显式调用。同 GPT-5.5 价位($5/$30)更强。"
+    reasoning: true   # GPT-5.6 全系锁 temperature=1
     pricing:
       input: 5.00
       output: 30.00
@@ -166,15 +169,15 @@ models:
       input: 0.0
       output: 0.211
 
-  # === 视频生成 (Veo 3.x) ===
+  # === 视频生成 (Veo 3.1 preview) ===
   gemini-video:
     name: Gemini Video (Veo)
     adapter: gemini
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api_key_env: GEMINI_API_KEY
-    model: veo-3.0-generate-001
+    model: veo-3.1-generate-preview
     video_generation: true
-    description: "Google Veo 3.0 stable 视频生成。最长 8 秒(限制为偶数:4/6/8),原生音频。"
+    description: "Google Veo 3.1 视频生成。最长 8 秒(限制为偶数:4/6/8),原生音频。注:旧 veo-3.0-generate-001 已下线。"
     pricing:
       input: 0.0
       output: 0.0
@@ -197,44 +200,47 @@ models:
       input: 0.70    # ¥5/M ≈ $0.70 (.cn 实际计价)
       output: 2.82   # ¥20/M ≈ $2.82 (.cn 实际计价)
 
-  # K2.6 备用入口 (非默认):
-  # - 多模态(图/视频/PDF)、256K context、thinking 模式
-  # - 注:thinking 与 $web_search 互斥,要联网必须 thinking.type=disabled
-  # - 显式调用: ask_ai(model="kimi_k26", ...) 或 ask_kimi 加参数
-  kimi_k26:
-    name: Kimi K2.6
+  # K2.7 Code 入口 (2026-07-12 加,替代下线的 K2.6,非默认):
+  # 取代 K2.6:同 262K context + 多模态(图/视频),同价(¥6.50/¥27),更新且 agentic coding 更强。
+  # 不开 web_search:code 用途无需联网,且可避开 K2.7「多步 tool call 必须回传 reasoning_content」的新约束。
+  # reasoning:true 处理 API 锁的 temperature=1/top_p=0.95。联网搜索仍走默认 v1-32k(kimi)。
+  # 显式调用: ask_kimi_k27_code(...) 或 ask_ai(model="kimi_k27_code", ...)
+  kimi_k27_code:
+    name: Kimi K2.7 Code
     adapter: openai
     endpoint: https://api.moonshot.cn/v1/chat/completions
     api_key_env: KIMI_API_KEY
-    model: kimi-k2.6
-    description: "Kimi K2.6 (备用,多模态)。256K context,支持图/视频/PDF 输入,thinking 模式。联网搜索能力与 v1 相当。"
-    reasoning: true   # K2.6 是 reasoning 模型,API 只接受 temperature=1,本 flag 让 server 跳过自动设 temperature
-    features:
-      - web_search
-    tool_loop_max: 5
+    model: kimi-k2.7-code
+    description: "Kimi K2.7 Code (备用,编程+多模态)。262K context,agentic coding 最强,支持图/视频输入,thinking 模式。编程默认仍用 DeepSeek,此为显式备选。"
+    reasoning: true   # K2.7 锁 temperature=1/top_p=0.95,本 flag 让 server 对 reasoning 模型跳过自动设这两个参数
     pricing:
-      input: 0.92    # ¥6.50/M cache miss ≈ $0.92 (cache hit ¥1.10/M ≈ $0.155)
+      input: 0.92    # ¥6.50/M cache miss ≈ $0.92 (cache hit ¥1.30/M ≈ $0.18)
       output: 3.80   # ¥27/M ≈ $3.80
 
 # 委派路由配置
+# fallback_chain: 当 delegate_to 的 API key 缺失时,按顺序尝试备选 chat 模型;全缺则回落到顶层 fallback
 routing:
   fallback: deepseek
   categories:
     research:
       keywords: [调研, 分析, 对比, 竞品, 方案, 综述, 梳理, survey, research, compare, analysis, "pros and cons", review]
       delegate_to: gemini
+      fallback_chain: [openai, deepseek, kimi]
       reason: "Gemini 3 Flash + Google Search 联网,日常调研足够;深度调研显式调 gemini-pro"
     code:
       keywords: [算法, 代码, 实现, 函数, 重构, 生成代码, 数学, 推导, 公式, algorithm, implement, code, math, function, refactor]
       delegate_to: deepseek
+      fallback_chain: [openai, gemini, kimi]
       reason: "DeepSeek V4 Flash 擅长代码与数学,1M context,极低成本;高难度任务显式调 deepseek-pro"
     realtime:
       keywords: [最新, 实时, 今天, 最近, 新闻, 热搜, 价格, 天气, 股价, 汇率, current, latest, today, news, price]
       delegate_to: kimi
+      fallback_chain: [gemini, openai, deepseek]
       reason: "Kimi 擅长中文联网搜索,获取国内实时信息"
     creative:
       keywords: [写作, 文案, 起名, 标题, slogan, 营销, 故事, creative, writing, copywriting, brainstorm]
       delegate_to: gemini
+      fallback_chain: [openai, deepseek, kimi]
       reason: "Gemini 3 Flash 创意写作能力强"
 
 # 特殊工具配置

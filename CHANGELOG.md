@@ -2,6 +2,30 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [3.8.0] - 2026-07-12
+
+### Added
+- **Kimi K2.7 Code 入口 (`ask_kimi_k27_code` / `ask_ai model="kimi_k27_code"`)** — Moonshot 新编程旗舰 `kimi-k2.7-code`,262K context + 多模态(图/视频),agentic coding 最强。走 `reasoning: true`(API 锁 temperature=1 / top_p=0.95,server 对 reasoning 模型跳过这两参数)。**故意不开 `web_search`**:code 用途无需联网,且规避 K2.7「多步 tool call 必须回传 assistant 的 `reasoning_content`」的新约束(当前 tool loop 未实现,开了会在第二轮报错)。编程默认仍走 DeepSeek,此为显式备选。已对真 API 验证:model ID 有效、不发 temperature 返回正常、发 temperature=0.5 确认被锁。
+
+### Removed
+- **Kimi K2.6 (`kimi_k26`)** — 被 K2.7 Code 逐项取代:同 262K context、同多模态、同价(¥6.50/¥27 in/out),更新且编程更强,无剩余差异化价值。联网搜索仍走默认 `kimi` (moonshot-v1-32k),不受影响。
+
+### Changed（三家模型刷新,基于 live `/models` + 官方定价核对,每个新 ID 都 curl 验证过）
+- **OpenAI GPT-5.4/5.5 → GPT-5.6**(2026-07-09 GA):`openai` = `gpt-5.4-mini` → **`gpt-5.6-luna`**($0.75/$4.50 → $1/$6,新一代廉价档);`openai-pro` = `gpt-5.5` → **`gpt-5.6-sol`**(同价 $5/$30,新旗舰)。⚠️ **GPT-5.6 全系锁 `temperature=1`**(curl 实测 `only 1 is allowed`),两条都加 `reasoning: true`;`index.js` 的 isReasoningModel 正则只到 gpt-5.5,5.6 靠 config flag。中档 Terra($2.50/$15)未加入。
+- **视频模型死链修复**:`gemini-video` = `veo-3.0-generate-001` → **`veo-3.1-generate-preview`**。旧 ID 已 404 下线(`generate_video` 之前必失败,因 check_health 跳过视频模型未被发现)。Veo 3.1 目前只有 preview 版。
+- **DeepSeek 定价核对 + 证伪注释清理**:删掉 `deepseek-pro` 那条「2026-05-31 后价格回归 4x」的预测——实际未发生,现价维持 `$0.435/$0.87`(官方 + 核对)。`deepseek-v4-flash` output 微调 `$0.29 → $0.28`。无模型变更(`/models` 只有 v4-flash/v4-pro)。
+- **Gemini 保持不变**:`gemini-3.5-flash` 已 GA 但价格是现用 `gemini-3-flash-preview` 的 3 倍($1.50/$9 vs $0.50/$3),用户选择主力默认继续用便宜的 preview 档;`gemini-pro` 无 3.5 版可升。
+
+## [3.7.0] - 2026-05-17
+
+### Fixed
+- **`ask_all` / `ask_both` 把文本 prompt 发给 image/video 生成模型导致桌面端尴尬响应** — 之前两个工具迭代全部 `modelKeys`,Imagen / Nano Banana / Veo / GPT Image 收到 chat 格式 prompt 后或返回 endpoint 错误,或返回"我是视频/图像模型,无法回答"。现在派生 `chatModelKeys`(过滤掉带 `image_generation` / `video_generation` flag 的),`ask_all` 和 `ask_both` 只跑 chat 模型;tool description 显式说明"Image/video models excluded — use generate_image / generate_video instead",让 Claude 桌面端不再尝试。
+- **`delegate` 的 category 在 `delegate_to` 模型 key 缺失时静默 fallback 到全局 deepseek,与 category 语义错配** — 例如用户没配 DeepSeek key 时,`code` category 本应找另一个能写代码的模型,但旧逻辑直接走全局 fallback(可能完全不合适)。现在每个 category 新增 `fallback_chain`(同类型备选清单),启动时按顺序 resolve 出实际可用模型,在 reason 里标 `[fallback: X key missing → Y]`。
+
+### Added
+- **启动日志打印 routing 路由表** — `📋 Delegate routing: research → Gemini, code → DeepSeek, ...`,fallback 项显式标出 `(fallback, deepseek key missing)`,用户一眼能看到自己 key 配置触发了哪些重映射。
+- **`delegate` tool description 动态包含 category 映射** — 之前只有"智能委派"一句,Claude 不知道每个 category 路由到谁,倾向直接走 `ask_<provider>` 绕开。现在 description 形如 `(Routes: research→Gemini, code→DeepSeek*, ...; * = fallback due to missing key)`,Claude 可基于映射信任地用 delegate。
+
 ## [3.6.6] - 2026-05-11
 
 ### Fixed
