@@ -30,3 +30,7 @@ scripts/
 
 # GitHub Pages source (privacy policy HTML is hosted, not bundled)
 docs/
+
+# 本地备份文件不进包
+*.bak
+*.bak.*

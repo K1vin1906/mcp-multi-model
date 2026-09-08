@@ -20,13 +20,13 @@ npx mcp-multi-model
 
 > "Generate a macOS app icon with a glowing indigo orb"
 
-Claude calls **Imagen 4 / GPT Image / Nano Banana**, saves the PNG, and opens it. No browser, no Figma, no context switch.
+Claude calls **Nano Banana 2 / Nano Banana Pro / GPT Image 2**, saves the PNG, and opens it. No browser, no Figma, no context switch.
 
 Video too — **Veo 3.1** generates short clips from a text prompt.
 
 ### 🧠 Smart routing — the right model for the job
 
-Need reasoning / agentic coding → it routes to **OpenAI GPT-5 / o-series** (auto-handles `max_completion_tokens`, skips `temperature` where unsupported).
+Need reasoning / agentic coding → it routes to **OpenAI GPT-6 / GPT-5.6 / o-series** (auto-handles `max_completion_tokens`, skips `temperature` where unsupported).
 Tell Claude to research something → it routes to **Gemini** (Google Search grounding).
 Ask it to write code cheaply → it routes to **DeepSeek** (fast, cheap, great at code).
 Need real-time info in Chinese → it routes to **Kimi** (web search).
@@ -70,10 +70,10 @@ That's it. No git clone, no build step.
 
 | Provider | Adapter | Why use it |
 |---|---|---|
-| **OpenAI** | `openai` | GPT-5 / GPT-5.5 reasoning, o1 / o3 / o4 series, GPT Image. Reasoning param handling is automatic (`max_completion_tokens`, temperature skipped where unsupported). |
-| **Gemini** | `gemini` | Long context, Google Search grounding. Image (Imagen 4 Fast / Ultra, Nano Banana 2) and video (Veo 3.1) generation built in. |
+| **OpenAI** | `openai` | GPT-6 Astra / GPT-5.6 reasoning, o-series, GPT Image 2. Reasoning param handling is automatic (`max_completion_tokens`, temperature skipped where unsupported). |
+| **Gemini** | `gemini` | Long context, Google Search grounding. Image (Nano Banana 2 / 2 Lite / Pro) and video (Veo 3.1) generation built in. |
 | **DeepSeek** | `openai` | Code, math, logic — extremely low cost |
-| **Kimi** (Moonshot) | `openai` | Chinese web search, real-time info, tool-calling loop |
+| **Kimi** (Moonshot) | `openai` | Kimi K2.6 Chinese web search (tool-calling loop) + Kimi K3 flagship reasoning |
 | **Grok** (xAI) | `openai` | Real-time X/Twitter context, reasoning |
 | **Perplexity** | `openai` | Sonar models with built-in web search and citations |
 | **Anthropic** (via OpenRouter) | `openai` | Claude models routed through OpenRouter |
@@ -95,7 +95,7 @@ Tools are dynamically generated from your config. With the default setup:
 | `ask_all` | Query all models in parallel, compare results |
 | `ask_both` | Query any two models in parallel |
 | `delegate` | Smart routing — auto-picks the best model for the task |
-| `generate_image` | Text → image via Gemini Imagen |
+| `generate_image` | Text → image via Gemini Nano Banana (default: Nano Banana 2 Lite) |
 | `generate_video` | Text → video via Gemini Veo |
 | `translate` | CN ↔ EN translation |
 | `research` | Deep research with web search |
@@ -203,10 +203,11 @@ Two endpoint families are routed automatically based on the model ID:
 
 | Model ID | Endpoint | Notes |
 |---|---|---|
-| `imagen-4-fast` | `:predict` | Default, ~$0.02/image |
-| `imagen-4-ultra` | `:predict` | 2K quality, ~$0.06/image |
-| `gemini-2.5-flash-image` (Nano Banana) | `:generateContent` | Fast (~3s), 2,000 RPM free tier |
-| `gemini-3-pro-image-preview` (Nano Banana 2) | `:generateContent` | High quality, 500 RPM |
+| `gemini-3.1-flash-lite-image` (Nano Banana 2 Lite) | `:generateContent` | Default, ~$0.034/image, lowest latency |
+| `gemini-3.1-flash-image` (Nano Banana 2) | `:generateContent` | ~$0.067/image, reference-image editing |
+| `gemini-3-pro-image` (Nano Banana Pro) | `:generateContent` | ~$0.134/image, up to 4K |
+
+> Imagen 4 (`imagen-4.0-*`) was retired by Google (all IDs return 404 as of 2026-09) and removed in 3.9.0.
 
 ### OpenAI family (uses `OPENAI_API_KEY`)
 

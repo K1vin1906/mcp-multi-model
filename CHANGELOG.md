@@ -2,6 +2,33 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [3.9.0] - 2026-09-09
+
+两个月(7-10 → 9-09)的模型市场变化一次追平。每个新 ID 都对真 API 探测过(live `/models` + 空请求 404/400 探活 + 实际调用)。
+
+### Fixed
+- **`generate_image` 默认路径已坏(Imagen 4 被 Google 下线)** — `imagen-4.0-fast-generate-001` / `imagen-4.0-ultra-generate-001` / `imagen-4.0-generate-001` 在 v1 与 v1beta 全部 404,ListModels 亦无任何 imagen 条目。与 3.8.0 的 Veo 3.0 死链同一类问题(check_health 跳过生成型模型所以没报)。删除 `gemini-image` / `imagen-4-ultra` 两条,新增 **`nano-banana-lite`**(`gemini-3.1-flash-lite-image`,官方 $30/M image tokens ≈ $0.034/1K 图)接任 `generate_image` 默认;`nano-banana` / `nano-banana-pro` 从 preview ID 切到 GA ID(`gemini-3.1-flash-image` / `gemini-3-pro-image`,价格不变)。
+- **GPT-6 会被发 `max_tokens` 而 400** — `useNewTokenParam` 正则只匹配 `gpt-5|o1-|o3-|o4-`,补上 `gpt-6`;reasoning 兜底正则同步扩到 `gpt-5.[5-9]|gpt-6`(config flag 仍优先)。
+- **Gemini 3.x thinking 三处修正** — (1) `thoughtsTokenCount` 现计入 completion tokens(thinking 按 output 计费,之前成本被低估 5-10x);(2) 流式路径跟踪 `finishReason`,`MAX_TOKENS` 且正文 <20 字时回显诊断(实测 3.8 Flash `maxOutputTokens=200` 默认 thinking 会吃掉 382 thoughts 只剩 8 个字正文);(3) 新增 config 字段 `thinking_level: low|medium|high` 透传 `generationConfig.thinkingConfig.thinkingLevel`(默认不设=模型默认 medium;`gemini` 入口暂保持默认,追求便宜/低延迟可自行设 low)。
+- **图像模型成本显示错误** — `pricing.output` 对图像模型语义是 $/张,之前按 token 公式算出 `$0.000047` 这种数;现按 `张数 × 单价`。
+- **思考模型正文为空时静默返回空串** — 根因是 reasoning 吃满 `max_tokens`(finish_reason=length,K2.7 Code 在 ask_all 里复现)。流式与非流式两条路径现在都回显诊断文本「思考耗尽 max_tokens,请提高 max_tokens 或换非思考模型」。
+
+### Changed
+- **OpenAI**:`openai-pro` = `gpt-5.6-sol` → **`gpt-6-astra`**(2026-09-03 发布,1.05M context / 128K 输出,$10/$50,锁 temperature=1 需 `reasoning: true`,实测确认)。`openai` 仍 `gpt-5.6-luna`,**定价 $1/$6 → $0.20/$1.20**(OpenAI 2026-07-30 降价 80%)。备注:Sol 现 $4/$20 促销至 11-21,嫌 Astra 贵可切回。
+- **Gemini**:`gemini` = `gemini-3-flash-preview` → **`gemini-3.8-flash`**(2026-09-02 GA,1M context,thinking 三档;Google Search grounding 实测正常)。定价 $0.50/$3 → **$0.75/$3.75 intro 价至 2026-12-31**,2027-01-01 起 $1.50/$7.50(届时重估)。`gemini-pro` 保持 `gemini-3.1-pro-preview`(Google 至今无 GA Pro 后继)。
+- **Kimi**:`kimi` = `moonshot-v1-32k`(已下线 404)→ **`kimi-k2.6`** + `reasoning: true`(思考模型锁 temperature=1);`$web_search` builtin 走现有 tool loop 实测通过(MCP stdio 端到端 17s)。定价 ¥6.50/¥27 → $0.92/$3.80。
+  - 为什么不上 K3 联网:官方 .cn 文档标注「联网搜索正在更新升级中,近期不建议使用,当前文档已过时」;实测 K3 `$web_search` 第二轮回传一律 400 `tokenization failed`(3 组查询 / 关 thinking / 5 种回传格式全复现)。K3 联网官方推荐 Formula API「官方工具」通道(另一套协议,未实现)。
+- **DeepSeek**:ID 不变(`deepseek-v4-flash` 已是 0731 版、`deepseek-v4-pro` 已是 0813 GA 版,官方说明调用方式不变),定价核对无变化。
+- 依赖:`@modelcontextprotocol/sdk` 1.29 → 1.30,`zod` 4.3 → 4.5,`js-yaml` 4.1 → 4.3(均 semver 范围内)。
+
+### Added
+- **Kimi K3 入口 (`ask_kimi_k3` / `ask_ai model="kimi_k3"`)** — Moonshot 旗舰(2026-07-16 发布,2.8T 开源权重,1M context,原生视觉,始终思考不可关)。`reasoning: true` + `force_non_streaming: true`,不开 web_search。定价 ¥20/¥100 → $2.82/$14.08。自动进入 `ask_all`(现 8 个 chat 模型)。
+- **`nano-banana-lite`** 见 Fixed。
+
+### Known
+- K3 顶层 `reasoning_effort`(low/high/max,默认 max)与 K2.6 `thinking: disabled` 未透传;可选后续加通用 `request_params`。
+- K3 联网等 Moonshot 文档更新后再评估官方工具通道。
+
 ## [3.8.0] - 2026-07-12
 
 ### Added

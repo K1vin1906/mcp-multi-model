@@ -318,6 +318,8 @@ async function fetchStream(url, options, { agent } = {}) {
   }
 }
 
+const REASONING_EXHAUSTED_MSG = "⚠️ 模型的思考(reasoning)耗尽了 max_tokens,正文为空。请提高 max_tokens,或改用非思考模型。";
+
 // ── 适配器：OpenAI 兼容 ──
 async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history = [], extra = {}) {
   // Image generation: gpt-image-* / dall-e-* 走 /v1/images/generations,
@@ -357,14 +359,14 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
   if (history.length) messages.push(...history);
   messages.push({ role: "user", content: prompt });
 
-  // OpenAI GPT-5 / o1 / o3 / o4 系列要求 max_completion_tokens,旧 max_tokens 不支持。
+  // OpenAI GPT-5 / GPT-6 / o1 / o3 / o4 系列要求 max_completion_tokens,旧 max_tokens 不支持(GPT-6 Astra 实测 400)。
   // DeepSeek / Kimi 仍用 max_tokens。按 model 名前缀分支。
-  const useNewTokenParam = /^(gpt-5|o1-|o3-|o4-)/.test(modelCfg.model);
+  const useNewTokenParam = /^(gpt-5|gpt-6|o1-|o3-|o4-)/.test(modelCfg.model);
   // Reasoning model 通常只支持 temperature=1,自定义会 400 报错。
   // 优先看 config 的 `reasoning: true` flag(显式声明),fallback 走已知 reasoning 模型名正则。
-  // 已知:OpenAI GPT-5.5 / o1 / o3 / o4,Moonshot Kimi K2.6 等。
+  // 已知:OpenAI GPT-5.5+ / GPT-6 / o1 / o3 / o4,Moonshot Kimi K2.6 / K2.7 / K3 等。
   const isReasoningModel = modelCfg.reasoning === true
-    || /^(gpt-5\.5|o1-|o3-|o4-)/.test(modelCfg.model);
+    || /^(gpt-5\.[5-9]|gpt-6|o1-|o3-|o4-)/.test(modelCfg.model);
   const reqBody = {
     model: modelCfg.model,
     messages,
@@ -408,8 +410,9 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
       choice = data.choices?.[0];
     }
     const usage = data.usage || {};
+    const nsContent = choice?.message?.content || "";
     return {
-      content: choice?.message?.content || "",
+      content: (!nsContent && choice?.finish_reason === "length") ? REASONING_EXHAUSTED_MSG : nsContent,
       model: data.model || modelCfg.model,
       tokens: { prompt: usage.prompt_tokens || 0, completion: usage.completion_tokens || 0, total: usage.total_tokens || 0 },
     };
@@ -426,6 +429,7 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
   let content = "";
   let usage = {};
   let model = modelCfg.model;
+  let finishReason = null;
 
   for await (const chunk of parseSSE(res)) {
     const delta = chunk.choices?.[0]?.delta?.content || "";
@@ -433,9 +437,12 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
       content += delta;
       emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta });
     }
+    if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
     if (chunk.usage) usage = chunk.usage;
     if (chunk.model) model = chunk.model;
   }
+  // 思考模型(K2.7 Code / DeepSeek Pro 等)的 reasoning 可能吃满 max_tokens,正文为空 → 回显诊断而非空串
+  if (!content && finishReason === "length") content = REASONING_EXHAUSTED_MSG;
 
   return {
     content,
@@ -457,6 +464,8 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
     generationConfig: { maxOutputTokens: maxTokens, temperature: extra.temperature ?? DEFAULT_TEMP },
   };
   if (extra.topP != null) body.generationConfig.topP = extra.topP;
+  // Gemini 3.x thinking 档位(low/medium/high)。thinking token 计入 maxOutputTokens,小预算时 medium/high 会把正文挤空。
+  if (modelCfg.thinking_level) body.generationConfig.thinkingConfig = { thinkingLevel: modelCfg.thinking_level };
 
   const features = modelCfg.features || [];
   if (features.includes("google_search")) {
@@ -521,7 +530,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
     return {
       content, images,
       model: modelCfg.model,
-      tokens: { prompt: usage.promptTokenCount || 0, completion: usage.candidatesTokenCount || 0, total: usage.totalTokenCount || 0 },
+      tokens: { prompt: usage.promptTokenCount || 0, completion: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0), total: usage.totalTokenCount || 0 },  // Gemini 3.x thinking token 按 output 计费,必须计入
     };
   }
 
@@ -534,6 +543,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
 
   let content = "";
   let usage = {};
+  let finishReason = null;
 
   for await (const chunk of parseSSE(res)) {
     const parts = chunk.candidates?.[0]?.content?.parts || [];
@@ -543,13 +553,18 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
         emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta: part.text });
       }
     }
+    if (chunk.candidates?.[0]?.finishReason) finishReason = chunk.candidates[0].finishReason;
     if (chunk.usageMetadata) usage = chunk.usageMetadata;
+  }
+  // Gemini 3.x thinking token 计入 maxOutputTokens:小预算 + medium/high thinking 会 MAX_TOKENS 且正文为空/几个字
+  if (finishReason === "MAX_TOKENS" && content.trim().length < 20) {
+    content = REASONING_EXHAUSTED_MSG + (content.trim() ? `\n(被截断的正文: ${content.trim()})` : "") + ` [thoughts=${usage.thoughtsTokenCount || 0} tokens]`;
   }
 
   return {
     content,
     model: modelCfg.model,
-    tokens: { prompt: usage.promptTokenCount || 0, completion: usage.candidatesTokenCount || 0, total: usage.totalTokenCount || 0 },
+    tokens: { prompt: usage.promptTokenCount || 0, completion: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0), total: usage.totalTokenCount || 0 },  // Gemini 3.x thinking token 按 output 计费,必须计入
   };
 }
 
@@ -666,7 +681,10 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
   try {
     const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history, { imageConfig, temperature, topP });
     result.duration_ms = Date.now() - t0;
-    result.cost_usd = calcCost(result.tokens, cfg.pricing);
+    // 图像模型 pricing.output 语义是 $/张(非 $/M token),按张计价;文本模型按 token
+    result.cost_usd = (cfg.image_generation && result.images?.length)
+      ? result.images.length * (cfg.pricing?.output || 0)
+      : calcCost(result.tokens, cfg.pricing);
     budget.spent += result.cost_usd;
     saveHistory(conversationId, key, prompt, result.content);
     emitEvent({ type: "AGENT_END", agent: key, model: result.model, content: result.content, tokens: result.tokens, duration_ms: result.duration_ms, cost_usd: result.cost_usd });

@@ -41,23 +41,23 @@ models:
     endpoint: https://api.openai.com/v1/chat/completions
     api_key_env: OPENAI_API_KEY
     model: gpt-5.6-luna
-    description: "GPT-5.6 Luna 默认 OpenAI 入口。廉价快速档,ask_all 第 4 视角识别其他模型偏置。"
+    description: "GPT-5.6 Luna 默认 OpenAI 入口。廉价快速档(2026-07-30 降价 80%),ask_all 第 4 视角识别其他模型偏置。"
     reasoning: true   # GPT-5.6 全系锁 temperature=1,本 flag 让 server 跳过自动设 temperature/top_p
     pricing:
-      input: 1.00
-      output: 6.00
+      input: 0.20    # 2026-07-30 起 $0.20/M(原 $1)
+      output: 1.20   # 2026-07-30 起 $1.20/M(原 $6)
 
   openai-pro:
     name: OpenAI Pro
     adapter: openai
     endpoint: https://api.openai.com/v1/chat/completions
     api_key_env: OPENAI_API_KEY
-    model: gpt-5.6-sol
-    description: "GPT-5.6 Sol 旗舰。复杂 reasoning / agentic coding / 多模态视觉显式调用。同 GPT-5.5 价位($5/$30)更强。"
-    reasoning: true   # GPT-5.6 全系锁 temperature=1
+    model: gpt-6-astra
+    description: "GPT-6 Astra 旗舰(2026-09-03 发布,1.05M context,128K 输出)。复杂 reasoning / agentic coding / 多模态视觉显式调用;ask_all 里的 OpenAI 旗舰视角。$10/$50。"
+    reasoning: true   # GPT-6 Astra 锁 temperature=1(实测 400 "Only the default (1) value is supported");且必须 max_completion_tokens(index.js 正则已含 gpt-6)
     pricing:
-      input: 5.00
-      output: 30.00
+      input: 10.00   # GPT-6 Astra $10/M(cached $1;>272K 输入 $20)。备注:GPT-5.6 Sol 现 $4/$20 促销至 2026-11-21,若嫌贵可切回 gpt-5.6-sol
+      output: 50.00  # $50/M(>272K 输入时 $75)
 
   # === Gemini 3.x ===
   gemini:
@@ -65,13 +65,13 @@ models:
     adapter: gemini
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api_key_env: GEMINI_API_KEY
-    model: gemini-3-flash-preview
-    description: "Gemini 3 Flash 默认入口。Google Search 联网,日常调研/创意首选,便宜。"
+    model: gemini-3.8-flash
+    description: "Gemini 3.8 Flash 默认入口(2026-09-02 GA,1M context,thinking low/medium/high)。Google Search 联网,日常调研/创意首选。"
     features:
       - google_search
     pricing:
-      input: 0.50
-      output: 3.00
+      input: 0.75    # intro 价至 2026-12-31;2027-01-01 起 $1.50(届时重估是否切回更便宜档)
+      output: 3.75   # intro 价;2027-01-01 起 $7.50。thinking token 计入 output
 
   gemini-pro:
     name: Gemini Pro
@@ -79,48 +79,19 @@ models:
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api_key_env: GEMINI_API_KEY
     model: gemini-3.1-pro-preview
-    description: "Gemini 3.1 Pro Preview,重要调研 / 深度分析 / 长文档显式调用。Google Search 联网。>200K context 价格 2x。"
+    description: "Gemini 3.1 Pro Preview,重要调研 / 深度分析 / 长文档显式调用。Google Search 联网。>200K context 价格 2x。注:2026-09-09 核,Google 仍无 GA 的 Pro 后继(3.5-3.8 只出 Flash)。"
     features:
       - google_search
     pricing:
       input: 2.00
       output: 12.00
 
-  # === 图像生成 (Imagen 4) ===
-  gemini-image:
-    name: Imagen 4 Fast
-    adapter: gemini
-    endpoint: https://generativelanguage.googleapis.com/v1beta
-    api_key_env: GEMINI_API_KEY
-    model: imagen-4.0-fast-generate-001
-    description: "Imagen 4 Fast 默认图像生成。$0.02/图,1024×1024,SynthID 水印,日常出图。"
-    image_generation: true
-    pricing:
-      input: 0.0
-      output: 0.02   # $/image
-
-  imagen-4-ultra:
-    name: Imagen 4 Ultra
-    adapter: gemini
-    endpoint: https://generativelanguage.googleapis.com/v1beta
-    api_key_env: GEMINI_API_KEY
-    model: imagen-4.0-ultra-generate-001
-    description: "Imagen 4 Ultra 高质量备选。$0.06/图,支持 2K resolution,需要专业出图时显式调。"
-    image_generation: true
-    pricing:
-      input: 0.0
-      output: 0.06
-
-  # === 图像编辑 / 多模态生图 (Gemini 原生 / Nano Banana) ===
-  # 与 Imagen 不同:Nano Banana 是 Gemini 多模态(图像入+图像出),
-  # 真正用武之地是"参考图编辑/迭代修改/与 Gemini 上下文打通"。
-  # 纯 text→image 还是用 Imagen 便宜。
   nano-banana:
     name: Nano Banana 2 (Gemini 3.1 Flash Image)
     adapter: gemini
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api_key_env: GEMINI_API_KEY
-    model: gemini-3.1-flash-image-preview
+    model: gemini-3.1-flash-image   # 2026-09-09 切 GA ID(preview 仍在但迟早下线),价格不变
     description: "Gemini 3.1 Flash Image (Nano Banana 2)。多模态图像编辑首选,支持参考图输入。"
     image_generation: true
     pricing:
@@ -132,7 +103,7 @@ models:
     adapter: gemini
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api_key_env: GEMINI_API_KEY
-    model: gemini-3-pro-image-preview
+    model: gemini-3-pro-image   # 2026-09-09 切 GA ID,价格不变
     description: "Gemini 3 Pro Image (Nano Banana Pro)。Pro reasoning + 4K + Gemini 上下文整合。需要旗舰多模态/复杂 prompt 理解时显式调。"
     image_generation: true
     pricing:
@@ -141,6 +112,20 @@ models:
 
   # === OpenAI GPT Image 2 (备胎,文字渲染/复杂指令理解强项) ===
   # 用武之地:Imagen 字渲染歪 / 复杂构图理解失败时显式调
+  # Nano Banana 2 Lite (2026-09-09 加):Imagen 4 全系被 Google 下线(imagen-4.0-* 三个 ID v1/v1beta 全 404,
+  # ListModels 也没有)后接任「日常出图默认」。官方 $30/M image tokens ≈ $0.0336/1K 图(Batch 半价)。
+  nano-banana-lite:
+    name: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)
+    adapter: gemini
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api_key_env: GEMINI_API_KEY
+    model: gemini-3.1-flash-lite-image
+    description: "Nano Banana 2 Lite 默认图像生成。~$0.034/1K 图,超低延迟,日常出图/头像/原型图。要参考图编辑用 nano-banana,要 4K 旗舰用 nano-banana-pro,要极致文字渲染用 gpt-image。"
+    image_generation: true
+    pricing:
+      input: 0.0
+      output: 0.0336   # $/1K image (官方 $30/M image tokens)
+
   gpt-image:
     name: GPT Image 2
     adapter: openai
@@ -183,28 +168,35 @@ models:
       output: 0.0
 
   # === Kimi (Moonshot) ===
-  # 默认入口 v1-32k:联网搜索场景与 K2.6 拉同一搜索后端,差异主要在多模态/agentic。
-  # 走 .cn 端点(¥ 计价),pricing 按 ¥ ÷ 7.1 折算 USD。
+  # 2026-09-09 迁移:moonshot-v1 全系列已下线(API 404),联网入口改 kimi-k2.6。
+  # 为什么不是 K3:官方文档明示"$web_search 正在更新升级中,近期不建议使用",实测 K3 第二轮回传
+  # 一律 400 "tokenization failed"(换查询/关 thinking 都一样);K3 联网官方推荐走 Formula API
+  # "官方工具"通道(标准 function tool,另一套协议,本 server 未实现)。K2.6 + $web_search 走现有
+  # tool loop 实测通过,且便宜 3-4x。K2.6 若再下线,重测 K3 联网或实现官方工具通道。
+  # K2.6 是思考模型:temperature 只允许 1 → reasoning:true 让 server 跳过 temperature/top_p。
+  # 走 .cn 端点(¥ 计价),pricing 按 ¥ ÷ 7.1 折算 USD。现役型号查: GET /v1/models
   kimi:
     name: Kimi
     adapter: openai
     endpoint: https://api.moonshot.cn/v1/chat/completions
     api_key_env: KIMI_API_KEY
-    model: moonshot-v1-32k
-    description: "向 Kimi (Moonshot v1-32k) 发送请求。擅长:中文联网搜索、实时信息、国内资讯。"
+    model: kimi-k2.6
+    description: "向 Kimi K2.6 发送请求(内置联网搜索)。擅长:中文联网搜索、实时信息、国内资讯。"
     system_prefix: "你是 Kimi,擅长联网搜索。当用户的问题涉及实时信息、最新数据、当前时间日期等内容时,请主动使用联网搜索工具获取最新结果。"
+    reasoning: true   # K2.6 锁 temperature=1/top_p=0.95
     features:
       - web_search
     tool_loop_max: 5
     pricing:
-      input: 0.70    # ¥5/M ≈ $0.70 (.cn 实际计价)
-      output: 2.82   # ¥20/M ≈ $2.82 (.cn 实际计价)
+      input: 0.92    # ¥6.50/M cache miss ≈ $0.92 (cache hit ¥1.10/M ≈ $0.15)
+      output: 3.80   # ¥27/M ≈ $3.80
 
-  # K2.7 Code 入口 (2026-07-12 加,替代下线的 K2.6,非默认):
-  # 取代 K2.6:同 262K context + 多模态(图/视频),同价(¥6.50/¥27),更新且 agentic coding 更强。
-  # 不开 web_search:code 用途无需联网,且可避开 K2.7「多步 tool call 必须回传 reasoning_content」的新约束。
-  # reasoning:true 处理 API 锁的 temperature=1/top_p=0.95。联网搜索仍走默认 v1-32k(kimi)。
-  # 显式调用: ask_kimi_k27_code(...) 或 ask_ai(model="kimi_k27_code", ...)
+  # K2.7 Code 入口 (2026-07-12 加,非默认;2026-09-09 核:K2.6 仍在役并重新担任联网入口,见上):
+  # 对比 K2.6:同 262K context + 多模态(图/视频),同价(¥6.50/¥27),agentic coding 更强。
+  # 不开 web_search:code 用途无需联网,且可避开 K2.7「多步 tool call 必须回传 reasoning_content」的新约束
+  # (该约束我们 tool loop 未实现)。联网搜索仍走默认 v1-32k(kimi)。
+  # reasoning:true 处理 API 锁的 temperature=1/top_p=0.95(server 对 reasoning 模型跳过这两个参数)。
+  # 编程默认仍用 DeepSeek,此为显式备选: ask_kimi_k27_code(...) 或 ask_ai(model="kimi_k27_code", ...)
   kimi_k27_code:
     name: Kimi K2.7 Code
     adapter: openai
@@ -216,6 +208,24 @@ models:
     pricing:
       input: 0.92    # ¥6.50/M cache miss ≈ $0.92 (cache hit ¥1.30/M ≈ $0.18)
       output: 3.80   # ¥27/M ≈ $3.80
+
+  # K3 入口 (2026-09-09 加,非默认):Moonshot 旗舰,2.8T 参数开源权重,1M context,原生视觉,
+  # 始终思考(不可关),temperature=1/top_p=0.95 锁死 → reasoning:true。顶层 reasoning_effort
+  # low/high/max 默认 max(本 server 未透传,默认即 max,输出偏贵:¥100/M)。
+  # 不开 web_search(见 kimi 段说明)。定位:ask_all 里的中国旗舰视角 / 高难度推理显式调用。
+  # .cn 需充值解锁旗舰(本账号已解锁,2026-09-09 实测 200)。
+  kimi_k3:
+    name: Kimi K3
+    adapter: openai
+    endpoint: https://api.moonshot.cn/v1/chat/completions
+    api_key_env: KIMI_API_KEY
+    model: kimi-k3
+    description: "Kimi K3 (Moonshot 旗舰,2.8T 开源权重,1M context,始终思考,支持图片输入)。高难度推理/长文档/中国旗舰视角对比用;不联网,联网用 ask_kimi。"
+    reasoning: true          # 锁 temperature=1/top_p=0.95
+    force_non_streaming: true  # 思考模型流式 delta.content 长期为空,非流式读 message.content
+    pricing:
+      input: 2.82    # ¥20/M cache miss ≈ $2.82 (cache hit ¥2/M ≈ $0.28)
+      output: 14.08  # ¥100/M ≈ $14.08
 
 # 委派路由配置
 # fallback_chain: 当 delegate_to 的 API key 缺失时,按顺序尝试备选 chat 模型;全缺则回落到顶层 fallback
@@ -252,8 +262,8 @@ tools:
     model: gemini
     description: "Gemini 3 Flash 调研(已联网)。"
   generate_image:
-    model: gemini-image
-    description: "Imagen 4 Fast 默认图像生成($0.02/图)。需要 2K 高质量显式用 imagen-4-ultra。"
+    model: nano-banana-lite
+    description: "Nano Banana 2 Lite 默认图像生成(~$0.034/图)。参考图编辑用 nano-banana,4K 旗舰用 nano-banana-pro,极致文字渲染用 gpt-image。Imagen 4 已被 Google 下线。"
   generate_video:
     model: gemini-video
     description: "Veo 3.x 视频生成(异步,最长 8 秒,4/6/8 偶数限制)。"
