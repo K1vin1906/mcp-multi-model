@@ -12,6 +12,10 @@ import { dirname, join } from "path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_VERSION = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf-8")).version;
 
+// Library mode: `MCP_MULTI_MODEL_LIBRARY=1` lets scripts (eval/run.js) import callModel() & co.
+// without starting the stdio transport or the monitor socket. Default behavior is unchanged.
+const LIBRARY_MODE = process.env.MCP_MULTI_MODEL_LIBRARY === "1";
+
 // ── 加载 .env ──
 try {
   const envFile = readFileSync(join(__dirname, ".env"), "utf-8");
@@ -123,7 +127,7 @@ for (const [key, cfg] of Object.entries(config.models || {})) {
     continue;
   }
   const pricing = cfg.pricing || {};
-  models[key] = { ...cfg, key, apiKey, fallbackTo: cfg.fallback_to || null, pricing: { input: pricing.input || 0, output: pricing.output || 0 } };
+  models[key] = { ...cfg, key, apiKey, fallbackTo: cfg.fallback_to || null, pricing: { input: pricing.input || 0, output: pricing.output || 0, web_search_call: pricing.web_search_call || 0 } };
 }
 
 const modelKeys = Object.keys(models);
@@ -208,8 +212,8 @@ function listenSocket() {
   });
 }
 
-// 定期重试，直到拿到 socket
-const socketRetryInterval = setInterval(() => {
+// 定期重试，直到拿到 socket(library 模式不碰 socket)
+const socketRetryInterval = LIBRARY_MODE ? null : setInterval(() => {
   if (ownsSocket) { clearInterval(socketRetryInterval); return; }
   if (existsSync(SOCKET_PATH)) {
     // 探测是否还活着
@@ -223,7 +227,7 @@ const socketRetryInterval = setInterval(() => {
     listenSocket();
   }
 }, 30_000);
-listenSocket();
+if (!LIBRARY_MODE) listenSocket();
 
 function emitEvent(event) {
   const line = JSON.stringify({ ...event, timestamp: Date.now() }) + "\n";
@@ -233,10 +237,11 @@ function emitEvent(event) {
 }
 
 // ── 带超时和重试的 fetch ──
-async function fetchWithRetry(url, options, { agent, retries = MAX_RETRIES } = {}) {
+async function fetchWithRetry(url, options, { agent, retries = MAX_RETRIES, timeoutMs } = {}) {
+  const timeout = timeoutMs || TIMEOUT;   // 模型级 timeout_ms 覆盖全局(联网/深度 reasoning 模型常超 60s)
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(url, { ...options, signal: AbortSignal.timeout(TIMEOUT) });
+      const res = await fetch(url, { ...options, signal: AbortSignal.timeout(timeout) });
       if ((res.status === 429 || res.status >= 500) && attempt < retries) {
         const wait = Math.min(1000 * 2 ** attempt, 8000);
         emitEvent({ type: "AGENT_RETRY", agent, status: res.status, attempt: attempt + 1, wait });
@@ -252,8 +257,8 @@ async function fetchWithRetry(url, options, { agent, retries = MAX_RETRIES } = {
       return await res.json();
     } catch (e) {
       if (e.name === "TimeoutError" || e.name === "AbortError") {
-        emitEvent({ type: "AGENT_ERROR", agent, error: `Request timeout (${TIMEOUT}ms)`, errType: "timeout" });
-        throw new Error(`请求超时 (${TIMEOUT / 1000}s)`);
+        emitEvent({ type: "AGENT_ERROR", agent, error: `Request timeout (${timeout}ms)`, errType: "timeout" });
+        throw new Error(`请求超时 (${timeout / 1000}s)`);
       }
       if (e.message?.includes("fetch failed") || e.cause?.code === "ECONNREFUSED") {
         if (attempt < retries) {
@@ -295,9 +300,10 @@ async function* parseSSE(response) {
   }
 }
 
-async function fetchStream(url, options, { agent } = {}) {
+async function fetchStream(url, options, { agent, timeoutMs } = {}) {
+  const limit = timeoutMs || TIMEOUT;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT);
+  const timeout = setTimeout(() => controller.abort(), limit);
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timeout);
@@ -311,8 +317,8 @@ async function fetchStream(url, options, { agent } = {}) {
   } catch (e) {
     clearTimeout(timeout);
     if (e.name === "AbortError") {
-      emitEvent({ type: "AGENT_ERROR", agent, error: `Request timeout (${TIMEOUT}ms)`, errType: "timeout" });
-      throw new Error(`请求超时 (${TIMEOUT / 1000}s)`);
+      emitEvent({ type: "AGENT_ERROR", agent, error: `Request timeout (${limit}ms)`, errType: "timeout" });
+      throw new Error(`请求超时 (${limit / 1000}s)`);
     }
     throw e;
   }
@@ -336,7 +342,7 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
     };
     const data = await fetchWithRetry(imgUrl,
       { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${modelCfg.apiKey}` }, body: JSON.stringify(imgBody) },
-      { agent: modelCfg.key }
+      { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms }
     );
     const items = data.data || [];
     const images = items.map(it => ({ mimeType: "image/png", data: it.b64_json }));
@@ -392,7 +398,7 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
   // 导致最终可见输出为空。强制非流式可正常读 message.content。
   if (hasToolLoop || modelCfg.force_non_streaming) {
     const fetchOpts = { method: "POST", headers, body: JSON.stringify(reqBody) };
-    let data = await fetchWithRetry(modelCfg.endpoint, fetchOpts, { agent: modelCfg.key });
+    let data = await fetchWithRetry(modelCfg.endpoint, fetchOpts, { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms });
     let choice = data.choices?.[0];
     const loopMax = modelCfg.tool_loop_max || 5;
     let rounds = 0;
@@ -405,7 +411,7 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
       reqBody.messages = messages;
       data = await fetchWithRetry(modelCfg.endpoint,
         { method: "POST", headers, body: JSON.stringify(reqBody) },
-        { agent: modelCfg.key }
+        { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms }
       );
       choice = data.choices?.[0];
     }
@@ -423,7 +429,7 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
   reqBody.stream_options = { include_usage: true };
   const res = await fetchStream(modelCfg.endpoint,
     { method: "POST", headers, body: JSON.stringify(reqBody) },
-    { agent: modelCfg.key }
+    { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms }
   );
 
   let content = "";
@@ -494,7 +500,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
       const url = `${modelCfg.endpoint}/models/${modelCfg.model}:predict?key=${modelCfg.apiKey}`;
       const data = await fetchWithRetry(url,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(predictBody) },
-        { agent: modelCfg.key }
+        { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms }
       );
       const predictions = data.predictions || [];
       const images = predictions.map(p => ({
@@ -516,7 +522,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
     const url = `${modelCfg.endpoint}/models/${modelCfg.model}:generateContent?key=${modelCfg.apiKey}`;
     const data = await fetchWithRetry(url,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-      { agent: modelCfg.key }
+      { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms }
     );
 
     let content = "";
@@ -538,7 +544,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
   const url = `${modelCfg.endpoint}/models/${modelCfg.model}:streamGenerateContent?key=${modelCfg.apiKey}&alt=sse`;
   const res = await fetchStream(url,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-    { agent: modelCfg.key }
+    { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms }
   );
 
   let content = "";
@@ -587,7 +593,7 @@ async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durati
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(submitBody),
-  }, { agent: modelCfg.key });
+  }, { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms });
 
   const opName = submitRes.name;
   if (!opName) throw new Error("No operation name in response: " + JSON.stringify(submitRes).slice(0, 500));
@@ -653,8 +659,85 @@ async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durati
   throw new Error(`Video generation timed out (${VIDEO_TIMEOUT / 1000}s)`);
 }
 
+// ── 适配器：OpenAI Responses API(联网搜索)──
+// Chat Completions 不支持 web_search tool(只有 gpt-5-search-api 专用模型,实测给过期答案),
+// 正经联网走 /v1/responses + tools:[{type:"web_search"}]。任何 GPT-5.x / GPT-6 都可用。
+// 非流式:一次请求内含多轮 web_search_call;流式事件 schema 与 chat 不同,暂不做。
+// config 可选项:reasoning_effort(low|medium|high|xhigh) / search_context_size(low|medium|high)
+//   / allowed_domains / blocked_domains(各 ≤100,不带 http 前缀)/ tool_choice(auto|required)
+//   / web_search_sources(true=回传完整检索来源,默认只回传正文引用)/ timeout_ms / pricing.web_search_call($/次,官方 $10/1K=0.01)
+async function adapterOpenAIResponses(modelCfg, prompt, systemPrompt, maxTokens, history = [], extra = {}) {
+  const input = history.map(m => ({ role: m.role, content: m.content }));
+  input.push({ role: "user", content: prompt });
+  const body = {
+    model: modelCfg.model,
+    input,
+    max_output_tokens: Math.max(16, maxTokens),   // Responses API 下限 16(check_health 的 5 会 400)
+    store: false,                                  // 不在 OpenAI 侧留存 30 天
+  };
+  const sysParts = [modelCfg.system_prefix, systemPrompt].filter(Boolean).join("\n\n");
+  if (sysParts) body.instructions = sysParts;
+  const isReasoningModel = modelCfg.reasoning === true || /^(gpt-5\.[5-9]|gpt-6|o1-|o3-|o4-)/.test(modelCfg.model);
+  if (!isReasoningModel) {
+    body.temperature = extra.temperature ?? modelCfg.temperature ?? DEFAULT_TEMP;
+    if (extra.topP != null) body.top_p = extra.topP;
+  }
+  if (modelCfg.reasoning_effort) body.reasoning = { effort: modelCfg.reasoning_effort };
+
+  const features = modelCfg.features || [];
+  if (features.includes("web_search") && !extra.healthPing) {   // check_health 的 ping 不触发按次计费的搜索
+    const tool = { type: "web_search" };
+    if (modelCfg.search_context_size) tool.search_context_size = modelCfg.search_context_size;
+    if (modelCfg.allowed_domains?.length || modelCfg.blocked_domains?.length) {
+      tool.filters = {};
+      if (modelCfg.allowed_domains?.length) tool.filters.allowed_domains = modelCfg.allowed_domains;
+      if (modelCfg.blocked_domains?.length) tool.filters.blocked_domains = modelCfg.blocked_domains;
+    }
+    body.tools = [tool];
+    body.tool_choice = modelCfg.tool_choice || "auto";
+    if (modelCfg.web_search_sources) body.include = ["web_search_call.action.sources"];
+  }
+
+  const headers = { "Content-Type": "application/json" };
+  if (modelCfg.apiKey) headers.Authorization = `Bearer ${modelCfg.apiKey}`;
+  const data = await fetchWithRetry(modelCfg.endpoint,
+    { method: "POST", headers, body: JSON.stringify(body) },
+    { agent: modelCfg.key, timeoutMs: modelCfg.timeout_ms }
+  );
+
+  let content = "";
+  const sources = new Map();   // url -> title(正文引用 + 可选完整检索来源,去重)
+  const cleanUrl = (u) => u.replace(/([?&])utm_source=openai(&|$)/, (m, a, b) => (b === "&" ? a : "")).replace(/[?&]$/, "");
+  let toolCalls = 0;
+  for (const item of data.output || []) {
+    if (item.type === "web_search_call") {
+      toolCalls++;
+      for (const src of item.action?.sources || []) if (src.url) sources.set(cleanUrl(src.url), src.title || "");
+    } else if (item.type === "message") {
+      for (const part of item.content || []) {
+        if (part.type !== "output_text") continue;
+        content += part.text || "";
+        for (const a of part.annotations || []) {
+          if (a.type === "url_citation" && a.url) { const u = cleanUrl(a.url); sources.set(u, a.title || sources.get(u) || ""); }
+        }
+      }
+    }
+  }
+  if (!content.trim() && data.status === "incomplete" && data.incomplete_details?.reason === "max_output_tokens") content = REASONING_EXHAUSTED_MSG;
+  if (sources.size && !extra.healthPing) {
+    content += "\n\nSources:\n" + [...sources].map(([u, t]) => `- ${t ? t + " — " : ""}${u}`).join("\n");
+  }
+  const usage = data.usage || {};
+  return {
+    content,
+    model: data.model || modelCfg.model,
+    tokens: { prompt: usage.input_tokens || 0, completion: usage.output_tokens || 0, total: usage.total_tokens || 0 },   // output_tokens 已含 reasoning
+    tool_calls: toolCalls,
+  };
+}
+
 // ── 通用调用入口 ──
-const adapters = { openai: adapterOpenAI, gemini: adapterGemini };
+const adapters = { openai: adapterOpenAI, gemini: adapterGemini, "openai-responses": adapterOpenAIResponses };
 
 async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false, imageConfig, temperature, topP } = {}) {
   const cfg = models[key];
@@ -684,7 +767,7 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
     // 图像模型 pricing.output 语义是 $/张(非 $/M token),按张计价;文本模型按 token
     result.cost_usd = (cfg.image_generation && result.images?.length)
       ? result.images.length * (cfg.pricing?.output || 0)
-      : calcCost(result.tokens, cfg.pricing);
+      : calcCost(result.tokens, cfg.pricing) + (result.tool_calls || 0) * (cfg.pricing?.web_search_call || 0);
     budget.spent += result.cost_usd;
     saveHistory(conversationId, key, prompt, result.content);
     emitEvent({ type: "AGENT_END", agent: key, model: result.model, content: result.content, tokens: result.tokens, duration_ms: result.duration_ms, cost_usd: result.cost_usd });
@@ -717,7 +800,8 @@ function calcCost(tokens, pricing) {
 function fmt(name, r) {
   const sec = (r.duration_ms / 1000).toFixed(1);
   const costStr = r.cost_usd > 0 ? ` | $${r.cost_usd.toFixed(6)}` : "";
-  return `━━━ ${name} (${r.model}) ━━━\n${r.content}\n[tokens: ${r.tokens.prompt} in → ${r.tokens.completion} out, total ${r.tokens.total} | ${sec}s${costStr}]`;
+  const searchStr = r.tool_calls ? ` | ${r.tool_calls} web search` : "";
+  return `━━━ ${name} (${r.model}) ━━━\n${r.content}\n[tokens: ${r.tokens.prompt} in → ${r.tokens.completion} out, total ${r.tokens.total} | ${sec}s${searchStr}${costStr}]`;
 }
 
 function costSummary(results, keys) {
@@ -805,7 +889,7 @@ server.tool("check_health", "Ping all configured models and report online/offlin
       const adapter = adapters[cfg.adapter];
       const t0 = Date.now();
       try {
-        await adapter(cfg, "Hi", "", 5, []);
+        await adapter(cfg, "Hi", "", 5, [], { healthPing: true });
         return { key, name: cfg.name, status: "online", latency_ms: Date.now() - t0 };
       } catch (e) {
         return { key, name: cfg.name, status: "offline", latency_ms: Date.now() - t0, error: e.message };
@@ -822,26 +906,27 @@ server.tool("check_health", "Ping all configured models and report online/offlin
   return { content: [{ type: "text", text: lines.join("\n") }] };
 });
 
-// ask_all — 并行调用所有 chat 模型 (image/video 生成模型被自动排除,见 generate_image / generate_video)
-if (chatModelKeys.length >= 2) {
+// ask_all — 并行调用所有 chat 模型 (image/video 生成模型被自动排除,见 generate_image / generate_video;config 里 `ask_all: false` 的入口也排除,如联网按次计费的 openai-search)
+const askAllKeys = chatModelKeys.filter(k => models[k].ask_all !== false);
+if (askAllKeys.length >= 2) {
   const genNote = generationModelKeys.length > 0
     ? ` Image/video models (${generationModelKeys.map(k => models[k].name).join(", ")}) are excluded — use generate_image / generate_video instead.`
     : "";
-  server.tool("ask_all", `Query all chat models in parallel for cross-model comparison (并行查询所有 chat 模型,返回对比结果). Models: ${chatModelKeys.map(k => models[k].name).join(", ")}.${genNote}`, {
+  server.tool("ask_all", `Query all chat models in parallel for cross-model comparison (并行查询所有 chat 模型,返回对比结果). Models: ${askAllKeys.map(k => models[k].name).join(", ")}.${genNote}`, {
     prompt: z.string().describe("通用提示词"),
     system_prompt: z.string().optional().describe("共用系统提示词"),
     conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
     const results = await Promise.allSettled(
-      chatModelKeys.map(k => callModel(k, prompt, opts))
+      askAllKeys.map(k => callModel(k, prompt, opts))
     );
     const parts = results.map((r, i) =>
       r.status === "fulfilled"
-        ? fmt(models[chatModelKeys[i]].name, r.value)
-        : `━━━ ${models[chatModelKeys[i]].name} 错误 ━━━\n${r.reason?.message}`
+        ? fmt(models[askAllKeys[i]].name, r.value)
+        : `━━━ ${models[askAllKeys[i]].name} 错误 ━━━\n${r.reason?.message}`
     );
-    parts.push(costSummary(results, chatModelKeys));
+    parts.push(costSummary(results, askAllKeys));
     return { content: [{ type: "text", text: parts.join("\n\n" + "═".repeat(50) + "\n\n") }] };
   });
 }
@@ -1113,24 +1198,29 @@ async function checkForUpdate() {
   } catch {}
 }
 
-// ── 启动 ──
-const transport = new StdioServerTransport();
-await server.connect(transport);
-console.error(`🚀 MCP Multi-Model Server v${PKG_VERSION} (${modelKeys.map(k => models[k].name).join(" + ")})`);
-checkForUpdate();
+// ── 启动(library 模式跳过:不接 stdio transport) ──
+if (!LIBRARY_MODE) {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error(`🚀 MCP Multi-Model Server v${PKG_VERSION} (${modelKeys.map(k => models[k].name).join(" + ")})`);
+  checkForUpdate();
 
-// ── 启动提示：缺失 API key ──
-if (skippedModels.length > 0) {
-  const lines = ["⚠️ Some models are disabled due to missing API keys:\n"];
-  for (const m of skippedModels) {
-    lines.push(`  • ${m.name} — set ${m.envVar}${m.url ? ` (get key: ${m.url})` : ""}`);
+  // ── 启动提示：缺失 API key ──
+  if (skippedModels.length > 0) {
+    const lines = ["⚠️ Some models are disabled due to missing API keys:\n"];
+    for (const m of skippedModels) {
+      lines.push(`  • ${m.name} — set ${m.envVar}${m.url ? ` (get key: ${m.url})` : ""}`);
+    }
+    lines.push("\nAdd keys to your MCP config env block or .env file to enable them.");
+    const msg = lines.join("\n");
+    console.error(msg);
+    try { await server.sendLoggingMessage({ level: "warning", data: msg }); } catch {}
   }
-  lines.push("\nAdd keys to your MCP config env block or .env file to enable them.");
-  const msg = lines.join("\n");
-  console.error(msg);
-  try { await server.sendLoggingMessage({ level: "warning", data: msg }); } catch {}
 }
 
 process.on("exit", () => { if (ownsSocket) try { unlinkSync(SOCKET_PATH); } catch {} });
 process.on("SIGINT", () => process.exit());
 process.on("SIGTERM", () => process.exit());
+
+// ── Library exports(仅 MCP_MULTI_MODEL_LIBRARY=1 时有意义,见 eval/run.js)──
+export { callModel, calcCost, models, chatModelKeys, resolvedCategoryModels, config, PKG_VERSION, TIMEOUT, DEFAULT_MAX_TOKENS };

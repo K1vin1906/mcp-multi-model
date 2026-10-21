@@ -1,0 +1,140 @@
+{
+  "run_id": "2026-10-21T15-45-57-v0",
+  "created_at": "2026-10-21T15:45:57.680Z",
+  "taskset_version": "v0",
+  "node": "v22.22.1",
+  "pkg_version": "3.9.0",
+  "timeout_ms": 60000,
+  "max_tokens": 8000,
+  "repeat": 1,
+  "parallel_tasks": 2,
+  "models": {
+    "deepseek": {
+      "model": "deepseek-v4-flash",
+      "name": "DeepSeek",
+      "pricing": {
+        "input": 0.14,
+        "output": 0.28
+      },
+      "reasoning": false,
+      "force_non_streaming": false,
+      "features": [],
+      "thinking_level": null
+    },
+    "gemini": {
+      "model": "gemini-3.8-flash",
+      "name": "Gemini",
+      "pricing": {
+        "input": 0.75,
+        "output": 3.75
+      },
+      "reasoning": false,
+      "force_non_streaming": false,
+      "features": [
+        "google_search"
+      ],
+      "thinking_level": null
+    },
+    "openai": {
+      "model": "gpt-5.6-luna",
+      "name": "OpenAI",
+      "pricing": {
+        "input": 0.2,
+        "output": 1.2
+      },
+      "reasoning": true,
+      "force_non_streaming": false,
+      "features": [],
+      "thinking_level": null
+    },
+    "kimi": {
+      "model": "kimi-k2.6",
+      "name": "Kimi",
+      "pricing": {
+        "input": 0.92,
+        "output": 3.8
+      },
+      "reasoning": true,
+      "force_non_streaming": false,
+      "features": [
+        "web_search"
+      ],
+      "thinking_level": null
+    },
+    "deepseek-pro": {
+      "model": "deepseek-v4-pro",
+      "name": "DeepSeek Pro",
+      "pricing": {
+        "input": 0.435,
+        "output": 0.87
+      },
+      "reasoning": false,
+      "force_non_streaming": true,
+      "features": [],
+      "thinking_level": null
+    },
+    "gemini-pro": {
+      "model": "gemini-3.1-pro-preview",
+      "name": "Gemini Pro",
+      "pricing": {
+        "input": 2,
+        "output": 12
+      },
+      "reasoning": false,
+      "force_non_streaming": false,
+      "features": [
+        "google_search"
+      ],
+      "thinking_level": null
+    }
+  },
+  "categories": {
+    "code": {
+      "temperature": 0,
+      "grading": "auto",
+      "system": "You are a senior JavaScript engineer. Follow the output format exactly."
+    },
+    "extraction": {
+      "temperature": 0,
+      "grading": "auto",
+      "system": "You are a precise information-extraction engine. Output a single JSON object and nothing else."
+    },
+    "reasoning": {
+      "temperature": 0,
+      "grading": "auto",
+      "system": "Solve the problem carefully. Keep the working brief. The very last line of your reply must be exactly `ANSWER: <final answer>`."
+    },
+    "research": {
+      "temperature": 0.7,
+      "grading": "blind",
+      "system": ""
+    },
+    "creative": {
+      "temperature": 0.7,
+      "grading": "blind",
+      "system": ""
+    }
+  },
+  "tasks": [
+    "code-merge-intervals",
+    "code-parse-duration",
+    "code-wildcard-match",
+    "code-lru-cache",
+    "extract-receipt-zh",
+    "extract-job-posting-en",
+    "extract-server-log",
+    "extract-rental-zh",
+    "reason-grid-paths",
+    "reason-mod-power",
+    "reason-knights-knaves",
+    "reason-crt-sum",
+    "research-sqlite-vs-postgres",
+    "research-websocket-vs-sse",
+    "research-swift6-strict-concurrency",
+    "research-letsencrypt-behind-cloudflare",
+    "creative-app-names",
+    "creative-app-store-copy",
+    "creative-moments-post",
+    "creative-blog-titles"
+  ]
+}

@@ -2,6 +2,17 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [3.10.0] - 2026-10-22
+
+### Added
+- **OpenAI 联网:新 adapter `openai-responses`**(Responses API + `tools:[{type:"web_search"}]`)。Chat Completions 不支持 web_search tool(只有 `gpt-5-search-api` 专用模型,实测把 Node 22 当 Active LTS 给过期答案),正经联网走 `/v1/responses`。两个新入口:**`openai-search`**(GPT-5.6 Luna,日常取证 ~$0.02-0.05/问)和 **`openai-pro-search`**(GPT-6 Astra,reasoning high + search_context_size high,重大决策深度取证,一问 $0.3-1)。回传正文自动附 `Sources:` URL 列表(去掉 `utm_source=openai`),`fmt` 行显示搜索次数。config 可选项:`search_context_size` / `allowed_domains` / `blocked_domains` / `tool_choice` / `reasoning_effort` / `web_search_sources`。
+- **成本:`pricing.web_search_call`**($/次,官方 $10/1K)计入 `cost_usd` 与日预算。
+- **模型级 `timeout_ms`** 覆盖全局 `defaults.timeout_ms`(所有 adapter 生效;`openai-pro-search` 设 180s)。
+- **`ask_all: false`** config flag:该入口不进 `ask_all`(联网按次计费且慢),仍可 `ask_ai` / `ask_both` 显式调用。
+- **`check_health` 对联网入口 ping 不触发搜索**(adapter 收到 `healthPing` 时不挂 tools),Responses API `max_output_tokens` 下限 16 已处理。
+- **`eval/` 路由实测 benchmark** — `node eval/run.js run`:5 类任务(code / extraction / reasoning / research / creative)× 4 题 × 6 模型,客观题自动打分(模型代码在 `node --permission` 沙箱跑隐藏测试 / JSON 字段级比对 / 标准答案精确匹配),research / creative 走匿名盲评 rubric;产出 `eval/results/<run>/TABLE.md`。首轮 2026-10-21(120 次调用,$0.78)的结论写进 README "Why these defaults"。`eval/` 不随 npm 包发布。
+- **Library 模式** — `MCP_MULTI_MODEL_LIBRARY=1` 时 `index.js` 可被 import(导出 `callModel` / `models` / `calcCost` 等),不启动 stdio transport 和 monitor socket,供跑分脚本复用同一套 adapter。默认启动行为不变。
+
 ## [3.9.0] - 2026-09-09
 
 两个月(7-10 → 9-09)的模型市场变化一次追平。每个新 ID 都对真 API 探测过(live `/models` + 空请求 404/400 探活 + 实际调用)。

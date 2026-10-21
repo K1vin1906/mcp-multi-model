@@ -1,0 +1,56 @@
+{
+  "R-12b5": { "score": 5, "note": "四点全对且精确(单写事务/Backup API/FTS5),结论明确,篇幅合规" },
+  "R-5e61": { "score": 4, "note": "覆盖完整;'直接复制文件即可完成一致性备份'把一致性说死了(热拷贝+WAL 不保证),扣准确 1" },
+  "R-4e45": { "score": 4, "note": "覆盖完整;'PG 全文检索内存开销偏大'站不住+'绝对最优解'夸张,篇幅压线,扣准确 1" },
+  "R-b0f3": { "score": 5, "note": "四点准确简洁(WAL/MVCC/pg_dump/FTS5),结论明确" },
+  "R-840c": { "score": 5, "note": "四点准确,提到 backup API 与 tsvector/GIN,结论明确" },
+  "R-9c52": { "score": 3, "note": "明显超 300 字(form 0);'PG 后台常驻内存占用过高'归因不当,扣准确 1" },
+
+  "R-7e82": { "score": 5, "note": "四项全对(含 WS 独立计数/HTTP2 WS 不普及),一句话推荐,约 190 词" },
+  "R-28fd": { "score": 5, "note": "表格形式,四项准确(extended CONNECT/Last-Event-ID/代理缓冲),一句话推荐,≈220 词" },
+  "R-49d2": { "score": 5, "note": "简洁准确,四项齐全,一句话推荐" },
+  "R-0482": { "score": 3, "note": "约 300 词超限(form 0);'WS fail silently'与'30-255 连接'细节可疑,扣准确 1" },
+  "R-b070": { "score": 5, "note": "四项准确,'bypass HTTP/2 multiplexing in most setups'到位,一句话推荐,篇幅合规" },
+  "R-dab6": { "score": 5, "note": "最精炼准确的一条(retry/Last-Event-ID/extended CONNECT/代理缓冲),一句话推荐" },
+
+  "R-fbf8": { "score": 4, "note": "三个痛点真实(KeyPath Sendable/@MainActor/静态可变状态);'Sendable KeyPath<Model,Type>'写法不对,扣准确 1" },
+  "R-8cc5": { "score": 5, "note": "ModelContext 非 Sendable/Task.detached/协议隔离三点真实,应对各一句,篇幅合规" },
+  "R-6910": { "score": 4, "note": "第 2 点'View 未显式主线程隔离'在 Swift 6 SDK 下 View 已 @MainActor,不是常见痛点,扣准确 1" },
+  "R-d7a3": { "score": 5, "note": "PersistentIdentifier/@ModelActor/ViewModel @MainActor 三点标准答案,最简洁" },
+  "R-31eb": { "score": 4, "note": "内容准确完整,但明显超 250 字(form 0)" },
+  "R-b5da": { "score": 5, "note": "直接引用真实报错文案,三条应对精确(MainActor.run/PersistentIdentifier/static var→let)" },
+
+  "R-2023": { "score": 5, "note": "HTTP-01 可行条件/无凭据/无通配 + DNS-01 token/零暴露/通配全对,推荐 DNS-01,约 150 词" },
+  "R-26c9": { "score": 4, "note": "把 HTTP-01 说成'renewals fail intermittently'夸大(LE 会跟随 HTTPS 重定向),扣准确 1;token 权限细节好" },
+  "R-9669": { "score": 5, "note": "最精确:指出 LE 跟随到 443 且 CF IP 在白名单内可行;token scope/通配/推荐齐全" },
+  "R-fc2b": { "score": 5, "note": "结构清晰全对,附 Origin CA 替代方案是真实加分,篇幅压线但合规" },
+  "R-c4da": { "score": 5, "note": "HTTP-01 重定向路径分析精确,DNS-01 最小权限 token,通配'alongside ordinary names'对" },
+  "R-0773": { "score": 4, "note": "Full(strict) 鸡生蛋问题是好点;但'redirect loops'归因到 HTTP-01 牵强,扣准确 1;带'Here is how'开场白" },
+
+  "R-a2d0": { "score": 3, "note": "合规;脉象可以,星脉/流光泛泛,slogan 像功能说明('CPU内存尽在掌握')" },
+  "R-fd98": { "score": 5, "note": "舷窗/毫厘/棱镜有真意象,slogan 自然且各不重复,全部合规" },
+  "R-486f": { "score": 2, "note": "轻况/栏况/舱表不是自然中文,slogan 五条句式雷同('一栏尽览/舱内全览/栏边即览')" },
+  "R-f875": { "score": 5, "note": "知微/机心/了然有文气,机心一语双关,slogan 对仗自然('倾听这台 Mac 的心跳')" },
+  "R-7781": { "score": 4, "note": "栏中晴雨/六感有想法;'简洁呈现关键数据'这类 slogan 偏功能说明" },
+  "R-067f": { "score": 4, "note": "五字对仗风格统一(方寸见真章/入微悉全局);随行览万象与监控工具关联弱" },
+
+  "R-60f3": { "score": 5, "note": "全部合规;'专治自学没反馈''每一步都算数''不用硬撑'抓住成年自学者真实痛点,口语自然" },
+  "R-3674": { "score": 2, "note": "合规但三条文案纯功能复述('分级词库''作业点评与反馈更清晰'),零创意" },
+  "R-1563": { "score": 4, "note": "合规,'有人带''怕断更'有生活感;'孤军奋战''扎实吃透'偏套话,附加的策略标签是噪音" },
+  "R-2e5d": { "score": 3, "note": "字数合规但虚构功能('真题语境搭配发音''每日15分钟'),营销文案乱加卖点是硬伤" },
+  "R-0702": { "score": 2, "note": "带'这里为您撰写了…'开场白;'利器/不再迷茫/告别哑巴德语/稳步进阶'全是 AI 套话" },
+  "R-4a94": { "score": 3, "note": "合规、朴实、不虚构;但三条几乎同一句话换序('词库+导师建班+有反馈')" },
+
+  "R-cb50": { "score": 5, "note": "蹦迪/请法师驱邪/科学战胜赛博闹鬼,节奏好,80 字内" },
+  "R-4632": { "score": 4, "note": "'盘问Siri''纯属物理手滑'好笑;但把快捷指令换成了 Siri,偏离 brief" },
+  "R-85f2": { "score": 4, "note": "合规自然但梗保守(开演唱会/不是闹鬼/手滑)" },
+  "R-98b7": { "score": 5, "note": "'科技捉鬼七天,小丑竟是我自己'是地道朋友圈语感" },
+  "R-94c8": { "score": 5, "note": "'它只是想互动,我却想给它超度'是最好的一句 punchline" },
+  "R-b30d": { "score": 4, "note": "'头顶太敏感,碰一下就深夜开麦'可以,但前半段是 brief 复述" },
+
+  "R-7548": { "score": 3, "note": "合规;标题干巴,摘要'实测表定路由'生硬" },
+  "R-dc45": { "score": 3, "note": "合规;三个标题几乎同义重排,摘要同样生硬" },
+  "R-33b0": { "score": 3, "note": "合规;标题关键词堆砌,摘要'基于实测表搭建 MCP 服务'因果说反了" },
+  "R-a00a": { "score": 2, "note": "摘要含字母约 76 字超 60(自称 51 字不实);'智能路由/最优调度/四大模型'套话" },
+  "R-11cb": { "score": 4, "note": "'一个 MCP Server 串联四大模型协作'最像真人起的标题,摘要是完整自然的一句话" }
+}

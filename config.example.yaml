@@ -1,6 +1,7 @@
 # mcp-multi-model 配置文件示例
 # 复制为 config.yaml 后,把对应 *_API_KEY 写到 .env 即可启动。未配 key 的模型启动时自动跳过。
-# 模型清单与 README 对齐 (DeepSeek V4 / Gemini 3.x / OpenAI GPT-5.6 / Imagen 4 / Veo 3.1);如需新增模型,在 models 下加一条即可。
+# 模型清单与 README 对齐 (DeepSeek V4 / Gemini 3.x / OpenAI GPT-6 + GPT-5.6 / Nano Banana 2 / Veo 3.1);如需新增模型,在 models 下加一条即可。
+# adapter 三种:openai(Chat Completions 兼容)/ gemini / openai-responses(OpenAI Responses API,联网 web_search)。
 
 defaults:
   max_tokens: 4000
@@ -58,6 +59,47 @@ models:
     pricing:
       input: 10.00   # GPT-6 Astra $10/M(cached $1;>272K 输入 $20)。备注:GPT-5.6 Sol 现 $4/$20 促销至 2026-11-21,若嫌贵可切回 gpt-5.6-sol
       output: 50.00  # $50/M(>272K 输入时 $75)
+
+  # === OpenAI 联网取证(Responses API + web_search tool,adapter: openai-responses)===
+  # Chat Completions 不支持 web_search(只有 gpt-5-search-api 专用模型),正经联网走 /v1/responses。
+  # 费用 = 模型 token + $10/1K 次搜索(pricing.web_search_call=0.01),搜索内容按模型 token 计价。
+  # `ask_all: false`:联网按次计费且慢,不进 ask_all,显式 ask_ai(model=...) / ask_both 调用。
+  # 可选:search_context_size low|medium|high / allowed_domains / blocked_domains / tool_choice required / reasoning_effort / web_search_sources / timeout_ms
+  openai-search:
+    name: OpenAI Search
+    adapter: openai-responses
+    endpoint: https://api.openai.com/v1/responses
+    api_key_env: OPENAI_API_KEY
+    model: gpt-5.6-luna
+    description: "GPT-5.6 Luna + OpenAI web search (Responses API), returns source URLs. Cheap evidence-gathering / realtime view, ~$0.02-0.05 per question."
+    reasoning: true
+    features:
+      - web_search
+    search_context_size: medium
+    ask_all: false
+    pricing:
+      input: 0.20
+      output: 1.20
+      web_search_call: 0.01   # $10 per 1K search calls
+
+  openai-pro-search:
+    name: OpenAI Pro Search
+    adapter: openai-responses
+    endpoint: https://api.openai.com/v1/responses
+    api_key_env: OPENAI_API_KEY
+    model: gpt-6-astra
+    description: "GPT-6 Astra + web search, reasoning high, search_context_size high. Deep evidence for high-stakes decisions; a single question can cost $0.3-1."
+    reasoning: true
+    reasoning_effort: high
+    features:
+      - web_search
+    search_context_size: high
+    timeout_ms: 180000   # deep reasoning + multi-round search often exceeds the global 60s
+    ask_all: false
+    pricing:
+      input: 10.00
+      output: 50.00
+      web_search_call: 0.01
 
   # === Gemini 3.x ===
   gemini:

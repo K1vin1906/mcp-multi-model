@@ -1,0 +1,242 @@
+{
+  "R-12b5": {
+    "task_id": "research-sqlite-vs-postgres",
+    "model_key": "openai",
+    "rep": 1
+  },
+  "R-5e61": {
+    "task_id": "research-sqlite-vs-postgres",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-4e45": {
+    "task_id": "research-sqlite-vs-postgres",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-b0f3": {
+    "task_id": "research-sqlite-vs-postgres",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-840c": {
+    "task_id": "research-sqlite-vs-postgres",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-9c52": {
+    "task_id": "research-sqlite-vs-postgres",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-7e82": {
+    "task_id": "research-websocket-vs-sse",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-28fd": {
+    "task_id": "research-websocket-vs-sse",
+    "model_key": "openai",
+    "rep": 1
+  },
+  "R-49d2": {
+    "task_id": "research-websocket-vs-sse",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-0482": {
+    "task_id": "research-websocket-vs-sse",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-b070": {
+    "task_id": "research-websocket-vs-sse",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-dab6": {
+    "task_id": "research-websocket-vs-sse",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-fbf8": {
+    "task_id": "research-swift6-strict-concurrency",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-8cc5": {
+    "task_id": "research-swift6-strict-concurrency",
+    "model_key": "openai",
+    "rep": 1
+  },
+  "R-6910": {
+    "task_id": "research-swift6-strict-concurrency",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-d7a3": {
+    "task_id": "research-swift6-strict-concurrency",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-31eb": {
+    "task_id": "research-swift6-strict-concurrency",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-b5da": {
+    "task_id": "research-swift6-strict-concurrency",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-2023": {
+    "task_id": "research-letsencrypt-behind-cloudflare",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-26c9": {
+    "task_id": "research-letsencrypt-behind-cloudflare",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-9669": {
+    "task_id": "research-letsencrypt-behind-cloudflare",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-fc2b": {
+    "task_id": "research-letsencrypt-behind-cloudflare",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-c4da": {
+    "task_id": "research-letsencrypt-behind-cloudflare",
+    "model_key": "openai",
+    "rep": 1
+  },
+  "R-0773": {
+    "task_id": "research-letsencrypt-behind-cloudflare",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-a2d0": {
+    "task_id": "creative-app-names",
+    "model_key": "openai",
+    "rep": 1
+  },
+  "R-fd98": {
+    "task_id": "creative-app-names",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-486f": {
+    "task_id": "creative-app-names",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-f875": {
+    "task_id": "creative-app-names",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-7781": {
+    "task_id": "creative-app-names",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-067f": {
+    "task_id": "creative-app-names",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-60f3": {
+    "task_id": "creative-app-store-copy",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-3674": {
+    "task_id": "creative-app-store-copy",
+    "model_key": "openai",
+    "rep": 1
+  },
+  "R-1563": {
+    "task_id": "creative-app-store-copy",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-2e5d": {
+    "task_id": "creative-app-store-copy",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-0702": {
+    "task_id": "creative-app-store-copy",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-4a94": {
+    "task_id": "creative-app-store-copy",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-cb50": {
+    "task_id": "creative-moments-post",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-4632": {
+    "task_id": "creative-moments-post",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-85f2": {
+    "task_id": "creative-moments-post",
+    "model_key": "openai",
+    "rep": 1
+  },
+  "R-98b7": {
+    "task_id": "creative-moments-post",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-94c8": {
+    "task_id": "creative-moments-post",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-b30d": {
+    "task_id": "creative-moments-post",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-7548": {
+    "task_id": "creative-blog-titles",
+    "model_key": "deepseek-pro",
+    "rep": 1
+  },
+  "R-dc45": {
+    "task_id": "creative-blog-titles",
+    "model_key": "deepseek",
+    "rep": 1
+  },
+  "R-33b0": {
+    "task_id": "creative-blog-titles",
+    "model_key": "gemini",
+    "rep": 1
+  },
+  "R-a00a": {
+    "task_id": "creative-blog-titles",
+    "model_key": "gemini-pro",
+    "rep": 1
+  },
+  "R-fbbf": {
+    "task_id": "creative-blog-titles",
+    "model_key": "kimi",
+    "rep": 1
+  },
+  "R-11cb": {
+    "task_id": "creative-blog-titles",
+    "model_key": "openai",
+    "rep": 1
+  }
+}

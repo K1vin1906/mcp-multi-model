@@ -41,7 +41,7 @@ Two answers, one terminal. See which model gives you a better solution.
 
 ### 🌐 Web search built in
 
-Gemini uses Google Search grounding. Kimi searches the Chinese web. No separate browser-use MCP needed.
+Gemini uses Google Search grounding. OpenAI GPT-5.6 / GPT-6 search via the Responses API `web_search` tool (`openai-search` / `openai-pro-search`, source URLs attached). Kimi searches the Chinese web. No separate browser-use MCP needed.
 
 ### 🔧 One-line install
 
@@ -70,7 +70,7 @@ That's it. No git clone, no build step.
 
 | Provider | Adapter | Why use it |
 |---|---|---|
-| **OpenAI** | `openai` | GPT-6 Astra / GPT-5.6 reasoning, o-series, GPT Image 2. Reasoning param handling is automatic (`max_completion_tokens`, temperature skipped where unsupported). |
+| **OpenAI** | `openai`, `openai-responses` | GPT-6 Astra / GPT-5.6 reasoning, o-series, GPT Image 2. `openai-responses` adds Responses API web search with cited sources. Reasoning param handling is automatic (`max_completion_tokens`, temperature skipped where unsupported). |
 | **Gemini** | `gemini` | Long context, Google Search grounding. Image (Nano Banana 2 / 2 Lite / Pro) and video (Veo 3.1) generation built in. |
 | **DeepSeek** | `openai` | Code, math, logic — extremely low cost |
 | **Kimi** (Moonshot) | `openai` | Kimi K2.6 Chinese web search (tool-calling loop) + Kimi K3 flagship reasoning |
@@ -81,6 +81,30 @@ That's it. No git clone, no build step.
 | **Ollama / LM Studio / llama.cpp / vLLM** | `openai` | **Local — no API key, no cost, full privacy** |
 
 Adding a new model is one block in `config.yaml` — see [Configuration](#configuration).
+
+## Why these defaults — measured
+
+The `routing.categories` table in `config.yaml` is backed by a small benchmark in [`eval/`](eval/README.md): 5 task types × 4 prompts × 6 models, run through the server's own adapters (same timeouts, retries, flags and pricing that `delegate` uses). Code is scored by hidden tests in a `node --permission` sandbox, extraction by field-level JSON match, reasoning by exact answer, research and creative by a blind rubric grade. First run 2026-10-21: 120 calls, **$0.78 total**.
+
+| model | code | extraction | reasoning | research | creative | **overall** | avg $/call | median s | timeouts |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| DeepSeek V4 Flash (`deepseek`) | 100 | 97 | 100 | 100 | 65 | **92** | $0.0003 | 2.5 | 0/20 |
+| Gemini 3.8 Flash (`gemini`) | 75 | 100 | 100 | 95 | 85 | **91** | $0.0059 | 11.7 | 1/20 |
+| GPT-5.6 Luna (`openai`) | 85 | 97 | 100 | 100 | 65 | **89** | $0.0004 | 5.1 | 0/20 |
+| Kimi K2.6 + web search (`kimi`) | 50 | 100 | 100 | 90 | 55 | **79** | $0.0064 | 33.9 | 3/20 |
+| DeepSeek V4 Pro (`deepseek-pro`) | 75 | 100 | 100 | 90 | 80 | **89** | $0.0012 | 9.9 | 1/20 |
+| Gemini 3.1 Pro (`gemini-pro`) | 100 | 100 | 100 | 70 | 70 | **88** | $0.0247 | 17.2 | 0/20 |
+
+Quality in %, n = 4 per cell, a 60 s timeout counts as 0. What it means for the defaults:
+
+- **`code → deepseek`** — confirmed. 100% on every hidden test, cheapest and fastest of the six; thinking models (Gemini Flash, DeepSeek Pro, Kimi) blew the 60 s timeout on the spec-heavy parser task.
+- **`research → gemini`** — kept for Google Search grounding, which v0 did not test. On knowledge-stable comparisons DeepSeek and GPT-5.6 Luna scored 100% at 1/15 of Gemini's cost, so for questions that don't need the live web `ask_deepseek` is the cheaper call.
+- **`creative → gemini`** — confirmed. Best blind creative score (4.25/5); DeepSeek Pro was close at 1/5 the cost but 4× slower.
+- **`realtime → kimi`** — not measured (no live-web tasks in v0). Kimi K2.6 is the slowest entry (34 s median, 3/20 timeouts), which is why nothing else is routed to it.
+- **Pro tiers are explicit, not default** — at this difficulty `deepseek-pro` matched Flash quality 4× slower, and `gemini-pro` scored lowest on research by ignoring length limits at 4× Flash cost.
+- Reasoning and extraction were at ceiling for all six models, so cost and latency decide: DeepSeek Flash.
+
+Method, caveats (n = 4, single latency samples, one blind grader) and per-task results: [`eval/README.md`](eval/README.md). Re-run with `node eval/run.js run`.
 
 ## MCP Tools
 
@@ -250,7 +274,7 @@ Mix local and cloud models freely — use `ask_all` to compare Ollama vs DeepSee
 - **Cost tracking** — Per-call token usage and cost estimation
 - **Response caching** — Cache identical prompts with configurable TTL
 - **Daily budget limit** — Set a spending cap; calls are blocked when exceeded
-- **Streaming** — Real-time SSE streaming for all adapters
+- **Streaming** — Real-time SSE streaming for chat adapters (`openai-responses` web search is non-streaming)
 
 ## Privacy
 
