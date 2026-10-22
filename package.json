@@ -1,7 +1,7 @@
 {
   "name": "mcp-multi-model",
-  "version": "3.10.0",
-  "description": "Give Claude Code superpowers — parallel multi-model queries, smart routing, and image/video generation across OpenAI (GPT-6, GPT-5.6, o-series, GPT Image 2), Gemini (Nano Banana, Veo), DeepSeek, Kimi, Grok, and 12+ providers",
+  "version": "3.11.0",
+  "description": "Give your AI coding agent superpowers — parallel multi-model queries, smart routing, and image/video generation across OpenAI (GPT-6, GPT-5.6, GPT Image 2), Gemini (Nano Banana, Veo), DeepSeek, Kimi and any OpenAI-compatible endpoint. Works with Claude Code, Codex CLI, Gemini CLI, Grok Build, Cursor and any MCP host.",
   "main": "index.js",
   "bin": {
     "mcp-multi-model": "index.js"
@@ -40,7 +40,12 @@
     "anthropic",
     "veo",
     "imagen",
-    "nano-banana"
+    "nano-banana",
+    "agent-skills",
+    "codex",
+    "gemini-cli",
+    "grok-build",
+    "cursor"
   ],
   "author": "K1vin1906",
   "license": "MIT",
@@ -57,7 +62,8 @@
     "setup.js",
     "config.example.yaml",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "skills"
   ],
   "engines": {
     "node": ">=18.0.0"

@@ -1,6 +1,6 @@
 # mcp-multi-model
 
-**Give Claude Code superpowers — image gen, video gen, web search, and smart multi-model routing.**
+**Give your AI coding agent superpowers — image gen, video gen, web search, and smart multi-model routing. Works with Claude Code, Codex CLI, Gemini CLI, Grok Build, Cursor and any MCP host.**
 
 One MCP server. All the models you need. Zero tab-switching.
 
@@ -118,7 +118,7 @@ Tools are dynamically generated from your config. With the default setup:
 | `ask_kimi` | Query Kimi directly |
 | `ask_all` | Query all models in parallel, compare results |
 | `ask_both` | Query any two models in parallel |
-| `delegate` | Smart routing — auto-picks the best model for the task |
+| `delegate` | Smart routing — offloads a self-contained task to the best-fit model by category |
 | `generate_image` | Text → image via Gemini Nano Banana (default: Nano Banana 2 Lite) |
 | `generate_video` | Text → video via Gemini Veo |
 | `translate` | CN ↔ EN translation |
@@ -129,7 +129,7 @@ Tools are dynamically generated from your config. With the default setup:
 
 ### Option 1: npx (recommended)
 
-Add to your Claude Code MCP config (`~/.mcp.json`):
+Add to your MCP host config. Claude Code reads `~/.mcp.json`; snippets for Codex CLI, Gemini CLI, Grok Build, Cursor and Cline are under [Works with any MCP host](#works-with-any-mcp-host).
 
 ```json
 {
@@ -169,6 +169,74 @@ Then add to your MCP config:
 ```
 
 > API keys can be set via `env` in the config above, or in a `.env` file in the project directory.
+
+## Works with any MCP host
+
+The server speaks plain stdio MCP, so every host can run it. Two things differ between hosts: how long they let one tool call run, and whether they read the server's built-in instructions. Some calls here are slow by design (`ask_all` 1-2 min, `openai-pro-search` up to 3 min, `generate_video` several minutes), so check the timeout column. Checked against official docs in October 2026; items marked *(secondary)* come from community sources.
+
+| Host | Config | Default tool timeout | Reads server `instructions` |
+|------|--------|----------------------|-----------------------------|
+| Claude Code | `~/.mcp.json` | long enough | yes (tested 2026-10-23) |
+| Codex CLI | `~/.codex/config.toml` | 60 s, raise it | no (v0.163, tested 2026-10-23), install the skill |
+| Gemini CLI | `~/.gemini/settings.json` | 600 s | yes (tested 2026-10-23) |
+| Grok Build | `~/.grok/config.toml`, also reads `.mcp.json` | 6000 s | not documented |
+| Cursor | `~/.cursor/mcp.json` | not documented | not documented |
+| Cline | MCP Servers panel | 60 s, raise it | not documented |
+
+**Codex CLI** — `~/.codex/config.toml`
+
+```toml
+[mcp_servers.multi-model]
+command = "npx"
+args = ["-y", "mcp-multi-model"]
+startup_timeout_sec = 30   # default 10; npx cold start can exceed it
+tool_timeout_sec = 300     # default 60; ask_all / openai-pro-search / video need more
+```
+
+Codex CLI 0.163 does not inject the server's `instructions` into the model's context (tested 2026-10-23), so install the skill below: Codex discovers `~/.codex/skills/multi-model/SKILL.md` and reads it before calling the tools.
+
+**Gemini CLI** — `~/.gemini/settings.json`
+
+```json
+{
+  "mcpServers": {
+    "multi-model": { "command": "npx", "args": ["-y", "mcp-multi-model"], "timeout": 600000 }
+  }
+}
+```
+
+**Grok Build**
+
+```bash
+grok mcp add multi-model -- npx -y mcp-multi-model
+grok mcp doctor multi-model
+```
+
+Grok Build also picks up `~/.claude.json`, `.cursor/mcp.json` and project `.mcp.json` automatically.
+
+**Cursor** uses the same JSON shape as Claude Code in `~/.cursor/mcp.json`. Its tool timeout is not documented, so keep calls short and avoid `ask_all` there. **Cline** users: open the server card in the MCP Servers panel and set *Network Timeout* to 5 minutes or more.
+
+API keys work the same everywhere: an `env` block in the host config, or a `.env` file next to the server.
+
+### Teach your agent how to use it: the `multi-model` skill
+
+Tools are hands; the skill is the brain. `skills/multi-model/SKILL.md` is an [Agent Skills](https://agentskills.io) file that tells the agent when to delegate, which model to pick, what each tier costs, how to fact-check with two web-grounded models, why `ask_all` is for bias detection rather than evidence, and how to handle slow calls on each host. The server also sends a short version of these rules as MCP `instructions` at startup, so hosts that read it get the basics with zero setup.
+
+Install the full skill once per host (one file, same content everywhere):
+
+| Host | Skill path |
+|------|------------|
+| Claude Code | `~/.claude/skills/multi-model/SKILL.md`, or load the repo as a plugin: `claude --plugin-dir /path/to/mcp-multi-model` |
+| Codex CLI | `~/.codex/skills/multi-model/SKILL.md` *(secondary)* |
+| Gemini CLI | `~/.gemini/skills/multi-model/SKILL.md` *(secondary)* |
+| Grok Build | `~/.grok/skills/multi-model/SKILL.md`, and it reads Claude Code skills and plugins directly |
+| Cursor | `~/.cursor/skills/multi-model/SKILL.md`, partial support *(secondary)* |
+
+```bash
+# example: Codex CLI
+curl -fsSL https://raw.githubusercontent.com/K1vin1906/mcp-multi-model/main/skills/multi-model/SKILL.md \
+  --create-dirs -o ~/.codex/skills/multi-model/SKILL.md
+```
 
 ## Configuration
 

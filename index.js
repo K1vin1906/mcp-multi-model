@@ -2,9 +2,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import net from "net";
 import yaml from "js-yaml";
-import { existsSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -175,67 +174,6 @@ if (config.routing?.categories) {
   }
 }
 
-// ── Agent Monitor: UDS 事件广播 ──
-const SOCKET_PATH = "/tmp/agent-monitor.sock";
-const monitorClients = new Set();
-let ownsSocket = false;
-
-const udsServer = net.createServer((client) => {
-  monitorClients.add(client);
-  client.on("close", () => monitorClients.delete(client));
-  client.on("error", () => monitorClients.delete(client));
-});
-
-function listenSocket() {
-  if (ownsSocket) return; // 已经在监听
-  udsServer.listen(SOCKET_PATH, () => {
-    ownsSocket = true;
-    console.error("📡 Monitor socket: " + SOCKET_PATH);
-  });
-  udsServer.once("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-      // probe: 连得上说明有活进程在用；连不上说明是残留，清理重建
-      const probe = net.createConnection(SOCKET_PATH);
-      probe.on("connect", () => {
-        probe.destroy();
-        console.error("📡 Monitor socket in use by another instance, will retry in 30s");
-      });
-      probe.on("error", () => {
-        try { unlinkSync(SOCKET_PATH); } catch {}
-        // 立即重试一次
-        udsServer.listen(SOCKET_PATH, () => {
-          ownsSocket = true;
-          console.error("📡 Monitor socket: " + SOCKET_PATH);
-        });
-      });
-    }
-  });
-}
-
-// 定期重试，直到拿到 socket(library 模式不碰 socket)
-const socketRetryInterval = LIBRARY_MODE ? null : setInterval(() => {
-  if (ownsSocket) { clearInterval(socketRetryInterval); return; }
-  if (existsSync(SOCKET_PATH)) {
-    // 探测是否还活着
-    const probe = net.createConnection(SOCKET_PATH);
-    probe.on("connect", () => probe.destroy()); // 还在用，下次再试
-    probe.on("error", () => {
-      try { unlinkSync(SOCKET_PATH); } catch {}
-      listenSocket();
-    });
-  } else {
-    listenSocket();
-  }
-}, 30_000);
-if (!LIBRARY_MODE) listenSocket();
-
-function emitEvent(event) {
-  const line = JSON.stringify({ ...event, timestamp: Date.now() }) + "\n";
-  for (const client of monitorClients) {
-    try { client.write(line); } catch { monitorClients.delete(client); }
-  }
-}
-
 // ── 带超时和重试的 fetch ──
 async function fetchWithRetry(url, options, { agent, retries = MAX_RETRIES, timeoutMs } = {}) {
   const timeout = timeoutMs || TIMEOUT;   // 模型级 timeout_ms 覆盖全局(联网/深度 reasoning 模型常超 60s)
@@ -244,31 +182,26 @@ async function fetchWithRetry(url, options, { agent, retries = MAX_RETRIES, time
       const res = await fetch(url, { ...options, signal: AbortSignal.timeout(timeout) });
       if ((res.status === 429 || res.status >= 500) && attempt < retries) {
         const wait = Math.min(1000 * 2 ** attempt, 8000);
-        emitEvent({ type: "AGENT_RETRY", agent, status: res.status, attempt: attempt + 1, wait });
         await new Promise(r => setTimeout(r, wait));
         continue;
       }
       if (!res.ok) {
         const errMsg = await res.text();
         const errType = res.status === 429 ? "rate_limit" : res.status >= 500 ? "server_error" : "api_error";
-        emitEvent({ type: "AGENT_ERROR", agent, error: errMsg, status: res.status, errType });
         throw new Error(`API error (${res.status}): ${errMsg}`);
       }
       return await res.json();
     } catch (e) {
       if (e.name === "TimeoutError" || e.name === "AbortError") {
-        emitEvent({ type: "AGENT_ERROR", agent, error: `Request timeout (${timeout}ms)`, errType: "timeout" });
-        throw new Error(`请求超时 (${timeout / 1000}s)`);
+        throw new Error(`Request timed out (${timeout / 1000}s)`);
       }
       if (e.message?.includes("fetch failed") || e.cause?.code === "ECONNREFUSED") {
         if (attempt < retries) {
           const wait = 1000 * 2 ** attempt;
-          emitEvent({ type: "AGENT_RETRY", agent, error: e.message, attempt: attempt + 1, wait });
           await new Promise(r => setTimeout(r, wait));
           continue;
         }
-        emitEvent({ type: "AGENT_ERROR", agent, error: e.message, errType: "network" });
-        throw new Error(`网络连接失败: ${e.message}`);
+        throw new Error(`Network error: ${e.message}`);
       }
       throw e;
     }
@@ -310,21 +243,19 @@ async function fetchStream(url, options, { agent, timeoutMs } = {}) {
     if (!res.ok) {
       const errMsg = await res.text();
       const errType = res.status === 429 ? "rate_limit" : res.status >= 500 ? "server_error" : "api_error";
-      emitEvent({ type: "AGENT_ERROR", agent, error: errMsg, status: res.status, errType });
       throw new Error(`API error (${res.status}): ${errMsg}`);
     }
     return res;
   } catch (e) {
     clearTimeout(timeout);
     if (e.name === "AbortError") {
-      emitEvent({ type: "AGENT_ERROR", agent, error: `Request timeout (${limit}ms)`, errType: "timeout" });
-      throw new Error(`请求超时 (${limit / 1000}s)`);
+      throw new Error(`Request timed out (${limit / 1000}s)`);
     }
     throw e;
   }
 }
 
-const REASONING_EXHAUSTED_MSG = "⚠️ 模型的思考(reasoning)耗尽了 max_tokens,正文为空。请提高 max_tokens,或改用非思考模型。";
+const REASONING_EXHAUSTED_MSG = "⚠️ The model spent its whole max_tokens budget on reasoning and returned no answer text. Raise max_tokens or use a non-thinking model.";
 
 // ── 适配器：OpenAI 兼容 ──
 async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history = [], extra = {}) {
@@ -441,7 +372,6 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
     const delta = chunk.choices?.[0]?.delta?.content || "";
     if (delta) {
       content += delta;
-      emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta });
     }
     if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
     if (chunk.usage) usage = chunk.usage;
@@ -556,7 +486,6 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
     for (const part of parts) {
       if (part.text) {
         content += part.text;
-        emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta: part.text });
       }
     }
     if (chunk.candidates?.[0]?.finishReason) finishReason = chunk.candidates[0].finishReason;
@@ -564,7 +493,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
   }
   // Gemini 3.x thinking token 计入 maxOutputTokens:小预算 + medium/high thinking 会 MAX_TOKENS 且正文为空/几个字
   if (finishReason === "MAX_TOKENS" && content.trim().length < 20) {
-    content = REASONING_EXHAUSTED_MSG + (content.trim() ? `\n(被截断的正文: ${content.trim()})` : "") + ` [thoughts=${usage.thoughtsTokenCount || 0} tokens]`;
+    content = REASONING_EXHAUSTED_MSG + (content.trim() ? `\n(partial text: ${content.trim()})` : "") + ` [thoughts=${usage.thoughtsTokenCount || 0} tokens]`;
   }
 
   return {
@@ -582,7 +511,6 @@ async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durati
 
   // Step 1: 提交生成请求
   const submitUrl = `${baseUrl}/models/${model}:predictLongRunning?key=${apiKey}`;
-  emitEvent({ type: "AGENT_START", agent: modelCfg.key, model, prompt });
 
   const submitBody = {
     instances: [{ prompt }],
@@ -598,7 +526,6 @@ async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durati
   const opName = submitRes.name;
   if (!opName) throw new Error("No operation name in response: " + JSON.stringify(submitRes).slice(0, 500));
 
-  emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta: `[submitted: ${opName}]` });
 
   // Step 2: 轮询等待完成
   const VIDEO_TIMEOUT = 180_000; // 3 min
@@ -621,7 +548,6 @@ async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durati
     }
 
     const elapsed = Math.round((Date.now() - t0) / 1000);
-    emitEvent({ type: "AGENT_CHUNK", agent: modelCfg.key, delta: `[polling ${elapsed}s...]` });
 
     if (status.done) {
       // 尝试多种可能的响应格式
@@ -651,7 +577,6 @@ async function generateVeoVideo(modelCfg, prompt, { aspectRatio = "16:9", durati
       if (!videos.length) throw new Error("No downloadable videos in response");
 
       const duration_ms = Date.now() - t0;
-      emitEvent({ type: "AGENT_END", agent: modelCfg.key, model, duration_ms, content: `[${videos.length} video(s) generated]` });
       return { videos, duration_ms };
     }
   }
@@ -741,9 +666,9 @@ const adapters = { openai: adapterOpenAI, gemini: adapterGemini, "openai-respons
 
 async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false, imageConfig, temperature, topP } = {}) {
   const cfg = models[key];
-  if (!cfg) throw new Error(`模型 "${key}" 未配置或 API key 缺失`);
+  if (!cfg) throw new Error(`Model "${key}" is not configured or its API key is missing`);
   const adapter = adapters[cfg.adapter];
-  if (!adapter) throw new Error(`未知的 adapter 类型: ${cfg.adapter}`);
+  if (!adapter) throw new Error(`Unknown adapter type: ${cfg.adapter}`);
 
   // Budget check
   checkBudget();
@@ -753,14 +678,12 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
   if (CACHE_TTL > 0 && !conversationId && !_skipCache) {
     const cached = responseCache.get(ck);
     if (cached && Date.now() < cached.expires) {
-      emitEvent({ type: "CACHE_HIT", agent: key, prompt: prompt.slice(0, 100) });
       return { ...cached.result };
     }
   }
 
   const history = getHistory(conversationId, key);
   const t0 = Date.now();
-  emitEvent({ type: "AGENT_START", agent: key, model: cfg.model, prompt, systemPrompt, conversationId: conversationId || undefined, historyTurns: history.length / 2 });
   try {
     const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history, { imageConfig, temperature, topP });
     result.duration_ms = Date.now() - t0;
@@ -770,7 +693,6 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
       : calcCost(result.tokens, cfg.pricing) + (result.tool_calls || 0) * (cfg.pricing?.web_search_call || 0);
     budget.spent += result.cost_usd;
     saveHistory(conversationId, key, prompt, result.content);
-    emitEvent({ type: "AGENT_END", agent: key, model: result.model, content: result.content, tokens: result.tokens, duration_ms: result.duration_ms, cost_usd: result.cost_usd });
 
     // Cache store
     if (CACHE_TTL > 0 && !conversationId && !_skipCache) {
@@ -780,10 +702,8 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
     return result;
   } catch (e) {
     const duration = Date.now() - t0;
-    emitEvent({ type: "AGENT_ERROR", agent: key, error: e.message, duration_ms: duration });
     // Fallback: if not already a fallback attempt and a fallback model is configured
     if (!_isFallback && cfg.fallbackTo && models[cfg.fallbackTo]) {
-      emitEvent({ type: "AGENT_FALLBACK", from: key, to: cfg.fallbackTo, error: e.message });
       return callModel(cfg.fallbackTo, prompt, { systemPrompt, maxTokens, conversationId, _isFallback: true });
     }
     throw e;
@@ -822,15 +742,19 @@ function costSummary(results, keys) {
 }
 
 // ── MCP Server ──
-const server = new McpServer({ name: "mcp-multi-model", version: PKG_VERSION }, { capabilities: { logging: {} } });
+// Server instructions: sent in the MCP initialize response. Claude Code and Gemini CLI inject it into the model's context;
+// Codex CLI 0.163 does not (tested 2026-10-23), which is why the same rules also ship as skills/multi-model/SKILL.md.
+// Keep the first 512 characters self-contained; the full playbook lives in skills/multi-model/SKILL.md.
+const SERVER_INSTRUCTIONS = "mcp-multi-model lets you consult other AI models (OpenAI GPT, Google Gemini, DeepSeek, Kimi, plus image/video generators) so you are not limited to one provider's view. RULES: (1) `delegate` offloads routine side-work by category: research->gemini (Google Search), code->deepseek, realtime->kimi (Chinese web), creative->gemini. (2) `ask_all` asks ~9 models at once. It is for spotting bias (all say X, one says Y), NOT evidence: only gemini/gemini-pro/kimi search the web inside it. (3) For facts that matter, get two independent web-grounded answers (`ask_both` with openai-search + gemini-pro) and cross-check primary sources yourself. (4) Slow calls: ask_all about 1-2 min, openai-pro-search up to 3 min, generate_video several min. Raise your host's MCP tool timeout to 300 s or more. (5) Cost: cheap = deepseek, gemini, openai (GPT-5.6 Luna), kimi; premium = openai-pro (GPT-6 Astra), openai-pro-search (~$0.3-1 per question), deepseek-pro, gemini-pro. Call premium models only when the task needs them. (6) Image/video tools save files locally and return the path. The bundled `multi-model` skill has the full playbook.";
+const server = new McpServer({ name: "mcp-multi-model", version: PKG_VERSION }, { capabilities: { logging: {} }, instructions: SERVER_INSTRUCTIONS });
 
 // 动态注册每个模型的 ask_{key} 工具
 for (const [key, cfg] of Object.entries(models)) {
-  server.tool(`ask_${key}`, cfg.description || `向 ${cfg.name} 发送请求。`, {
-    prompt: z.string().describe("提示词"),
-    system_prompt: z.string().optional().describe("系统提示词"),
-    max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("最大 token 数"),
-    conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
+  server.tool(`ask_${key}`, cfg.description || `Send a prompt to ${cfg.name}.`, {
+    prompt: z.string().describe("The prompt to send"),
+    system_prompt: z.string().optional().describe("Optional system prompt"),
+    max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("Max output tokens"),
+    conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, max_tokens, conversation_id }) => {
     try {
       const r = await callModel(key, prompt, { systemPrompt: system_prompt || "", maxTokens: max_tokens, conversationId: conversation_id || "" });
@@ -840,14 +764,14 @@ for (const [key, cfg] of Object.entries(models)) {
       }
       return { content: parts };
     } catch (e) {
-      return { content: [{ type: "text", text: `${cfg.name} 错误: ${e.message}` }], isError: true };
+      return { content: [{ type: "text", text: `${cfg.name} error: ${e.message}` }], isError: true };
     }
   });
 }
 
 // ask_ai — 通用入口，指定模型 + 推理参数
 const modelEnum = z.enum(modelKeys);
-server.tool("ask_ai", `Unified entry point: send a prompt to any configured model (${modelKeys.join(", ")}). Supports per-call inference parameters.`, {
+server.tool("ask_ai", `Unified entry point: send a prompt to any configured model (${modelKeys.join(", ")}). Prefer the ask_<model> shortcuts; use ask_ai when you need temperature / top_p overrides.`, {
   model: modelEnum.describe(`Target model key: ${modelKeys.join(", ")}`),
   prompt: z.string().describe("The prompt to send"),
   system_prompt: z.string().optional().describe("Optional system prompt"),
@@ -912,10 +836,10 @@ if (askAllKeys.length >= 2) {
   const genNote = generationModelKeys.length > 0
     ? ` Image/video models (${generationModelKeys.map(k => models[k].name).join(", ")}) are excluded — use generate_image / generate_video instead.`
     : "";
-  server.tool("ask_all", `Query all chat models in parallel for cross-model comparison (并行查询所有 chat 模型,返回对比结果). Models: ${askAllKeys.map(k => models[k].name).join(", ")}.${genNote}`, {
-    prompt: z.string().describe("通用提示词"),
-    system_prompt: z.string().optional().describe("共用系统提示词"),
-    conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
+  server.tool("ask_all", `Query all chat models in parallel and return every answer side by side. Use to detect bias or disagreement between models, not as evidence: only Gemini and Kimi search the web inside this call. Slow (about 1-2 min; each model is capped by its own timeout) and roughly the cost of ten single calls. Models: ${askAllKeys.map(k => models[k].name).join(", ")}.${genNote}`, {
+    prompt: z.string().describe("The prompt sent to every model"),
+    system_prompt: z.string().optional().describe("Shared system prompt"),
+    conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
     const results = await Promise.allSettled(
@@ -924,7 +848,7 @@ if (askAllKeys.length >= 2) {
     const parts = results.map((r, i) =>
       r.status === "fulfilled"
         ? fmt(models[askAllKeys[i]].name, r.value)
-        : `━━━ ${models[askAllKeys[i]].name} 错误 ━━━\n${r.reason?.message}`
+        : `━━━ ${models[askAllKeys[i]].name} error ━━━\n${r.reason?.message}`
     );
     parts.push(costSummary(results, askAllKeys));
     return { content: [{ type: "text", text: parts.join("\n\n" + "═".repeat(50) + "\n\n") }] };
@@ -934,12 +858,12 @@ if (askAllKeys.length >= 2) {
 // ask_both — 并行调用任意两个 chat 模型 (image/video 不在 enum 内)
 if (chatModelKeys.length >= 2) {
   const chatModelEnum = z.enum(chatModelKeys);
-  server.tool("ask_both", "Query two specified chat models in parallel and return side-by-side comparison (并行查询两个指定 chat 模型,返回对比结果). Image/video models excluded — use generate_image / generate_video instead.", {
-    prompt: z.string().describe("通用提示词"),
-    model_a: chatModelEnum.optional().default(chatModelKeys[0]).describe("第一个 chat 模型"),
-    model_b: chatModelEnum.optional().default(chatModelKeys[1]).describe("第二个 chat 模型"),
-    system_prompt: z.string().optional().describe("共用系统提示词"),
-    conversation_id: z.string().optional().describe("对话 ID，传入相同 ID 可保持多轮上下文"),
+  server.tool("ask_both", "Query two chosen chat models in parallel and return both answers. Recommended pairing for fact-checking: model_a=\"openai-search\", model_b=\"gemini-pro\" (both web-grounded). Image/video models are excluded; use generate_image / generate_video.", {
+    prompt: z.string().describe("The prompt sent to every model"),
+    model_a: chatModelEnum.optional().default(chatModelKeys[0]).describe("First chat model"),
+    model_b: chatModelEnum.optional().default(chatModelKeys[1]).describe("Second chat model"),
+    system_prompt: z.string().optional().describe("Shared system prompt"),
+    conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, model_a, model_b, system_prompt, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
     const results = await Promise.allSettled([
@@ -949,9 +873,9 @@ if (chatModelKeys.length >= 2) {
     const keys = [model_a, model_b];
     const names = [models[model_a]?.name || model_a, models[model_b]?.name || model_b];
     const parts = [];
-    parts.push(results[0].status === "fulfilled" ? fmt(names[0], results[0].value) : `━━━ ${names[0]} 错误 ━━━\n${results[0].reason?.message}`);
+    parts.push(results[0].status === "fulfilled" ? fmt(names[0], results[0].value) : `━━━ ${names[0]} error ━━━\n${results[0].reason?.message}`);
     parts.push("\n" + "═".repeat(50) + "\n");
-    parts.push(results[1].status === "fulfilled" ? fmt(names[1], results[1].value) : `━━━ ${names[1]} 错误 ━━━\n${results[1].reason?.message}`);
+    parts.push(results[1].status === "fulfilled" ? fmt(names[1], results[1].value) : `━━━ ${names[1]} error ━━━\n${results[1].reason?.message}`);
     parts.push(costSummary(results, keys));
     return { content: [{ type: "text", text: parts.join("\n") }] };
   });
@@ -998,7 +922,7 @@ if (routingCfg) {
       }
     }
     if (bestMatch) return bestMatch;
-    return { category: "default", model: fallbackModel, reason: "无明确匹配，使用默认模型" };
+    return { category: "default", model: fallbackModel, reason: "no category matched, using the default model" };
   }
 
   const categoryEnum = categoryNames.length > 0
@@ -1011,15 +935,15 @@ if (routingCfg) {
     .join(", ");
   const hasFallback = Object.values(resolvedCategoryModels).some(i => i.fromFallback);
   const delegateDesc = routingDesc
-    ? `智能委派路由 (Routes: ${routingDesc}${hasFallback ? "; * = fallback due to missing key" : ""}). Claude 不想干的活丢过来。`
-    : "智能委派：根据任务内容自动选择最合适的模型执行。Claude 不想干的活丢过来。";
+    ? `Offload a self-contained task to the best-fit model by category (routes: ${routingDesc}${hasFallback ? "; * = fallback due to missing key" : ""}). Use for routine side-work; the model cannot see your files or conversation, so put every needed fact in the task. Returns the answer plus token/latency/cost stats.`
+    : "Offload a self-contained task to the best-fit model, chosen from the task text. Use for routine side-work; the model cannot see your files or conversation, so put every needed fact in the task.";
 
   server.tool("delegate", delegateDesc, {
-    task: z.string().describe("任务描述，详细说明需要做什么"),
-    category: categoryEnum.describe(`任务类别提示（${categoryNames.join("/")}），auto 为自动判断`),
-    system_prompt: z.string().optional().describe("额外的系统提示词"),
-    max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("最大 token 数"),
-    conversation_id: z.string().optional().describe("对话 ID"),
+    task: z.string().describe("Task description. Be specific and include every fact the model needs; it cannot see your files or conversation"),
+    category: categoryEnum.describe(`Task category (${categoryNames.join(" / ")}); auto = keyword routing`),
+    system_prompt: z.string().optional().describe("Extra system prompt"),
+    max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("Max output tokens"),
+    conversation_id: z.string().optional().describe("Conversation ID"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ task, category, system_prompt, max_tokens, conversation_id }) => {
     try {
       const route = routeTask(task, category === "auto" ? null : category);
@@ -1028,12 +952,11 @@ if (routingCfg) {
         maxTokens: max_tokens,
         conversationId: conversation_id || "",
       };
-      emitEvent({ type: "DELEGATE_ROUTE", task: task.slice(0, 200), category: route.category, model: route.model, reason: route.reason });
       const r = await callModel(route.model, task, opts);
-      const header = `🎯 委派路由: ${route.category} → ${models[route.model].name} (${route.reason})`;
+      const header = `🎯 Routed: ${route.category} → ${models[route.model].name} (${route.reason})`;
       return { content: [{ type: "text", text: `${header}\n\n${fmt(models[route.model].name, r)}` }] };
     } catch (e) {
-      return { content: [{ type: "text", text: `委派错误: ${e.message}` }], isError: true };
+      return { content: [{ type: "text", text: `Delegate error: ${e.message}` }], isError: true };
     }
   });
 }
@@ -1041,18 +964,18 @@ if (routingCfg) {
 // translate — 翻译工具
 const translateCfg = config.tools?.translate;
 if (translateCfg && models[translateCfg.model]) {
-  server.tool("translate", translateCfg.description || "中英互译。", {
-    text: z.string().describe("需要翻译的文本"),
-    target_language: z.enum(["中文", "英文", "auto"]).optional().default("auto").describe("目标语言"),
-    style: z.enum(["formal", "casual", "technical"]).optional().default("formal").describe("翻译风格"),
+  server.tool("translate", translateCfg.description || "Translate between Chinese and English.", {
+    text: z.string().describe("Text to translate"),
+    target_language: z.enum(["中文", "英文", "auto"]).optional().default("auto").describe("Target language (auto = detect and flip)"),
+    style: z.enum(["formal", "casual", "technical"]).optional().default("formal").describe("Translation style"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ text, target_language, style }) => {
     const styles = { formal: "正式专业", casual: "口语化", technical: "技术文档风格，保留专有名词" };
     const sys = `你是专业翻译。风格:${styles[style]}。目标语言:${target_language === "auto" ? "自动检测，中↔英互译" : target_language}。只输出翻译结果。`;
     try {
       const r = await callModel(translateCfg.model, text, { systemPrompt: sys });
-      return { content: [{ type: "text", text: `翻译结果 (${style}):\n\n${r.content}\n\n[${models[translateCfg.model].name} · ${r.tokens.total} tokens · ${(r.duration_ms / 1000).toFixed(1)}s]` }] };
+      return { content: [{ type: "text", text: `Translation (${style}):\n\n${r.content}\n\n[${models[translateCfg.model].name} · ${r.tokens.total} tokens · ${(r.duration_ms / 1000).toFixed(1)}s]` }] };
     } catch (e) {
-      return { content: [{ type: "text", text: `翻译错误: ${e.message}` }], isError: true };
+      return { content: [{ type: "text", text: `Translate error: ${e.message}` }], isError: true };
     }
   });
 }
@@ -1060,18 +983,18 @@ if (translateCfg && models[translateCfg.model]) {
 // research — 调研工具
 const researchCfg = config.tools?.research;
 if (researchCfg && models[researchCfg.model]) {
-  server.tool("research", researchCfg.description || "技术调研和分析。", {
-    topic: z.string().describe("研究主题"),
-    depth: z.enum(["brief", "standard", "deep"]).optional().default("standard").describe("研究深度"),
-    language: z.enum(["中文", "英文"]).optional().default("中文").describe("输出语言"),
+  server.tool("research", researchCfg.description || "Technical research and analysis.", {
+    topic: z.string().describe("Research topic"),
+    depth: z.enum(["brief", "standard", "deep"]).optional().default("standard").describe("Research depth"),
+    language: z.enum(["中文", "英文"]).optional().default("中文").describe("Output language"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ topic, depth, language }) => {
     const depths = { brief: "200字以内", standard: "500字左右", deep: "1000字以上，含背景、现状、优劣、建议" };
     const sys = `你是资深技术研究员。深度:${depths[depth]}。语言:${language}。结构化输出。`;
     try {
       const r = await callModel(researchCfg.model, topic, { systemPrompt: sys, maxTokens: depth === "deep" ? 8000 : DEFAULT_MAX_TOKENS });
-      return { content: [{ type: "text", text: `研究结果:\n\n${r.content}\n\n[${models[researchCfg.model].name} · ${r.tokens.total} tokens · ${(r.duration_ms / 1000).toFixed(1)}s]` }] };
+      return { content: [{ type: "text", text: `Research result:\n\n${r.content}\n\n[${models[researchCfg.model].name} · ${r.tokens.total} tokens · ${(r.duration_ms / 1000).toFixed(1)}s]` }] };
     } catch (e) {
-      return { content: [{ type: "text", text: `研究错误: ${e.message}` }], isError: true };
+      return { content: [{ type: "text", text: `Research error: ${e.message}` }], isError: true };
     }
   });
 }
@@ -1082,7 +1005,7 @@ if (imgGenCfg && models[imgGenCfg.model]) {
   server.tool("generate_image", imgGenCfg.description || "Generate images from text descriptions.", {
     prompt: z.string().describe("Image description / what to generate"),
     aspect_ratio: z.enum(["1:1", "3:2", "4:3", "16:9", "9:16"]).optional().default("1:1").describe("Image aspect ratio"),
-    save_path: z.string().optional().describe("Save image to this path. If omitted, saves to /tmp/mcp-images/ and auto-opens."),
+    save_path: z.string().optional().describe("Save image to this path. If omitted, saves to /tmp/mcp-media/images/ and auto-opens."),
   }, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async ({ prompt, aspect_ratio, save_path }) => {
     try {
       const modelKey = imgGenCfg.model;
@@ -1190,7 +1113,14 @@ async function checkForUpdate() {
     });
     if (!res.ok) return;
     const { version: latest } = await res.json();
-    if (latest && latest !== PKG_VERSION) {
+    // Only nag when the registry is actually ahead; a local checkout newer than npm is not an "update".
+    const newer = (a, b) => {
+      const pa = String(a).split(".").map(n => parseInt(n, 10) || 0);
+      const pb = String(b).split(".").map(n => parseInt(n, 10) || 0);
+      for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0); }
+      return false;
+    };
+    if (latest && newer(latest, PKG_VERSION)) {
       const msg = `\n📦 Update available: v${PKG_VERSION} → v${latest}\n   Run: npx mcp-multi-model@latest\n`;
       console.error(msg);
       try { await server.sendLoggingMessage({ level: "info", data: msg }); } catch {}
@@ -1218,7 +1148,6 @@ if (!LIBRARY_MODE) {
   }
 }
 
-process.on("exit", () => { if (ownsSocket) try { unlinkSync(SOCKET_PATH); } catch {} });
 process.on("SIGINT", () => process.exit());
 process.on("SIGTERM", () => process.exit());
 

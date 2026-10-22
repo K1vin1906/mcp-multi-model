@@ -2,6 +2,30 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [3.11.0] - 2026-10-23
+
+「把脑发出去」:server 的工具跨宿主早就能跑,这版把编排规则随 server 一起发出去,Codex CLI / Gemini CLI / Grok Build / Cursor 用户拿到和 Claude Code 一样的用法。
+
+### Added
+- **Server instructions**(MCP initialize `instructions` 字段):握手时把使用规则注入宿主 system prompt。**实测(10-23)**:Gemini CLI 0.65 逐字读到;Codex CLI 0.163 不注入(模型看不到,靠下面的 skill 补);Claude Code 实测读到(新会话 system prompt 出现 multi-model 段)。前 512 字自包含:路由默认、`ask_all` 只看偏置不当证据、慢工具要调宿主超时、成本档。
+- **Agent Skill `multi-model`**(`skills/multi-model/SKILL.md`,agentskills.io 开放标准格式,一份全宿主):完整编排手册——工具表、默认路由、成本与速度档、重要事实的取证协议(两路独立联网 + 自读一手来源 + 不一致必须解释)、`ask_all` 定位、各宿主 MCP 超时表、禁忌与示例。npm 包随带(`files` 加 `skills`)。
+- **Claude Code plugin 清单**(`.claude-plugin/plugin.json`,内联 `mcpServers` 走 `npx -y mcp-multi-model`):`claude plugin install` 一步装 server + skill;Grok Build 直接读 Claude plugin 格式。
+- README 新节 **Works with any MCP host**:Claude Code / Codex CLI / Gemini CLI / Grok Build / Cursor / Cline 的接入片段、默认超时与修法、skill 安装路径(官方文档核实的与二手来源分开标注)。
+
+### Changed
+- **工具描述全部宿主中立、英文**:`delegate`(去掉 Claude 专属措辞)、`ask_all`(明确"偏置检测、非证据、只有 Gemini/Kimi 联网、慢且贵")、`ask_both`(给出取证推荐配对)、`ask_ai`;`config.example.yaml` 全部 17 个模型与 4 个 tools 的描述换成英文一句话版(不再带维护者私人核验备注)。
+- `gemini` 入口加 `timeout_ms: 120000`:Google Search grounding 常超全局 60s(10-22 实测 5 次 2 超时 2 截断)。
+- CI:`actions/checkout` / `actions/setup-node` 升 v5,Node 22(Node 20 已 EOL,runner 强制 Node 24 的 deprecation 警告消除)。
+- README 标题与 package.json 描述从 "for Claude Code" 改为面向任何 MCP 宿主。
+- 运行期用户可见文本英文化:错误信息(超时 / 网络 / 模型未配置)、`delegate` 回复头(`🎯 Routed:`)、reasoning 耗尽提示、`ask_all` / `ask_both` 失败分隔、`translate` / `research` 结果头;`config.example.yaml` 的 4 条 routing `reason` 同步英文。`translate` / `research` 的中文 enum 值与系统提示不变(工具设计如此)。
+- `generate_image` 的 `save_path` 描述改为与代码一致的 `/tmp/mcp-media/images/`(此前写的是不存在的 `/tmp/mcp-images/`)。
+
+### Fixed
+- 启动时的版本检查只在 npm 版本**高于**本地时提示更新;此前本地比 npm 新(从 git 跑、或发版前)也会误报 "Update available: v3.11.0 → v3.10.0"。
+
+### Removed
+- **agent-monitor UDS 事件广播**:`/tmp/agent-monitor.sock` 监听、30s 重试、`monitorClients`、`emitEvent` 及全部调用点、退出清理钩子、`net` import。agent-monitor 项目 2026-10-23 已归档删除,这段是死代码。工具返回里的 token / 耗时 / 成本统计不受影响。
+
 ## [3.10.0] - 2026-10-22
 
 ### Added
