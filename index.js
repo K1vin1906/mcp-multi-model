@@ -1133,7 +1133,7 @@ if (!LIBRARY_MODE) {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`🚀 MCP Multi-Model Server v${PKG_VERSION} (${modelKeys.map(k => models[k].name).join(" + ")})`);
-  checkForUpdate();
+  if (!process.env.MCP_MULTI_MODEL_NO_UPDATE_CHECK) checkForUpdate();
 
   // ── 启动提示：缺失 API key ──
   if (skippedModels.length > 0) {

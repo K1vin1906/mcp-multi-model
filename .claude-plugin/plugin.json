@@ -1,7 +1,7 @@
 {
   "name": "mcp-multi-model",
   "displayName": "Multi-Model",
-  "version": "3.11.0",
+  "version": "3.11.1",
   "description": "Consult OpenAI, Gemini, DeepSeek and Kimi from your agent, compare models side by side, generate images and video. Ships the server plus a skill that teaches the agent when to use which model.",
   "author": { "name": "K1vin1906", "url": "https://github.com/K1vin1906" },
   "homepage": "https://github.com/K1vin1906/mcp-multi-model#readme",
@@ -11,7 +11,7 @@
   "mcpServers": {
     "multi-model": {
       "command": "npx",
-      "args": ["-y", "mcp-multi-model"]
+      "args": ["-y", "mcp-multi-model@3.11.1"]
     }
   }
 }

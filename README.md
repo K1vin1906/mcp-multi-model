@@ -346,7 +346,12 @@ Mix local and cloud models freely — use `ask_all` to compare Ollama vs DeepSee
 
 ## Privacy
 
-This is a **local relay**. No telemetry, no analytics, no data sent to the extension author. Prompts go directly from your machine to the LLM provider you configured.
+This is a **local relay**. No telemetry, no analytics, no data is sent to the author. Everything the server sends or runs:
+
+- **Prompts go to the providers you configured.** Each call sends the prompt, the optional system prompt and, when you pass a `conversation_id`, the earlier turns of that conversation to the one provider that serves the model you asked for. With the default `config.yaml` that is OpenAI, Google (Gemini), DeepSeek and Moonshot (Kimi); `ask_all` sends the same prompt to every chat model at once. Any endpoint you add yourself (Ollama, OpenRouter, ...) receives the same. API keys are read from your environment or `.env` and sent only to their own provider.
+- **One version check at startup.** The server sends a single GET to `https://registry.npmjs.org/mcp-multi-model/latest` so it can tell you when a newer version exists. Nothing is sent but the request itself. Set `MCP_MULTI_MODEL_NO_UPDATE_CHECK=1` to turn it off.
+- **Generated files are opened locally.** `generate_image` and `generate_video` write the file under `/tmp/mcp-media/` and, on macOS, run `open` on it so it shows up right away. Pass `save_path` to choose the location and skip the auto-open. No other local commands are run.
+- **Nothing else.** No crash reporting, no usage statistics, no third-party SDKs.
 
 **Full policy:** [k1vin1906.github.io/mcp-multi-model/privacy.html](https://k1vin1906.github.io/mcp-multi-model/privacy.html)
 

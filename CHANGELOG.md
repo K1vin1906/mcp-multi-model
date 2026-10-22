@@ -2,6 +2,15 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [3.11.1] - 2026-10-23
+
+### Changed
+- README **Privacy** 节写清全部对外行为:prompt / system prompt / 同 `conversation_id` 的历史只发给被调用的那一家 provider、启动时对 registry.npmjs.org 的一次版本检查、生成图片/视频后 macOS `open` 自动打开(传 `save_path` 可跳过)。为 Anthropic plugin 目录的安全扫描做准备(未披露的数据去向 = 首次提交直接拒)。
+- `.claude-plugin/plugin.json` 的 npx 启动命令锁定精确版本(`mcp-multi-model@3.11.1`),目录校验要求(未锁 = Blocks)。以后每次发版同步改这里。
+
+### Added
+- 环境变量 `MCP_MULTI_MODEL_NO_UPDATE_CHECK=1` 关闭启动时的 npm 版本检查。
+
 ## [3.11.0] - 2026-10-23
 
 「把脑发出去」:server 的工具跨宿主早就能跑,这版把编排规则随 server 一起发出去,Codex CLI / Gemini CLI / Grok Build / Cursor 用户拿到和 Claude Code 一样的用法。
