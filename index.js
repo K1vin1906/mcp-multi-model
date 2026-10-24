@@ -280,8 +280,18 @@ async function fetchStream(url, options, { agent, timeoutMs } = {}) {
 
 const REASONING_EXHAUSTED_MSG = "⚠️ The model spent its whole max_tokens budget on reasoning and returned no answer text. Raise max_tokens or use a non-thinking model.";
 // A cut-off answer is never returned silently: the model stopped on its output budget but did produce text → append this.
-function truncationNote(detail) {
-  return `\n\n[⚠️ Output truncated: max_tokens reached${detail ? ` (${detail})` : ""}. Raise max_tokens, narrow the ask, or pass effort="fast" so less budget goes to reasoning.]`;
+// The hint follows where the budget went: reasoning tokens > 0 → a lower effort frees budget; 0 → the answer itself outgrew
+// max_tokens (Gemini 3.8 Flash writes ~2x a requested length), so only a bigger budget or a narrower ask helps; null = unknown.
+function truncationNote(reasoningTokens, label = "reasoning") {
+  const known = reasoningTokens != null && Number.isFinite(Number(reasoningTokens));
+  const used = known ? Number(reasoningTokens) : 0;
+  const detail = known ? ` (${label} used ${used} tokens)` : "";
+  const hint = used > 0
+    ? 'Raise max_tokens, narrow the ask, or pass effort="fast" so less budget goes to reasoning.'
+    : known
+      ? `Raise max_tokens or narrow the ask; ${label} used none of the budget, the answer itself outgrew it.`
+      : "Raise max_tokens or narrow the ask.";
+  return `\n\n[⚠️ Output truncated: max_tokens reached${detail}. ${hint}]`;
 }
 function stopNote(reason) {
   return `\n\n[⚠️ Output stopped early: ${reason}]`;
@@ -290,7 +300,7 @@ function stopNote(reason) {
 function finalizeOpenAIText(content, finish, reasoningTokens) {
   if (finish === "length") {
     if (!content.trim()) return REASONING_EXHAUSTED_MSG;
-    return content + truncationNote(reasoningTokens != null ? `reasoning used ${reasoningTokens} tokens` : "");
+    return content + truncationNote(reasoningTokens);
   }
   if (finish === "content_filter") return content + stopNote("content_filter");
   return content;
@@ -546,7 +556,7 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
   if (finishReason === "MAX_TOKENS") {
     content = content.trim().length < 20
       ? REASONING_EXHAUSTED_MSG + (content.trim() ? `\n(partial text: ${content.trim()})` : "") + ` [thoughts=${thoughts} tokens]`
-      : content + truncationNote(`thinking used ${thoughts} tokens`);
+      : content + truncationNote(thoughts, "thinking");
   } else if (finishReason && finishReason !== "STOP") {
     content += stopNote(finishReason);
   } else if (!finishReason) {
@@ -715,7 +725,7 @@ async function adapterOpenAIResponses(modelCfg, prompt, systemPrompt, maxTokens,
   if (data.status === "failed") throw new Error(`API error: ${data.error?.message || "response failed"}`);
   if (respIncomplete === "max_output_tokens") {
     // max_output_tokens includes reasoning tokens: a reasoning model can burn the whole budget before (or while) writing the answer.
-    content = content.trim() ? content + truncationNote(respReasoning != null ? `reasoning used ${respReasoning} tokens` : "") : REASONING_EXHAUSTED_MSG;
+    content = content.trim() ? content + truncationNote(respReasoning) : REASONING_EXHAUSTED_MSG;
   } else if (respIncomplete) {
     content += stopNote(respIncomplete);
   }
@@ -846,7 +856,7 @@ async function callWithFallback(primaryKey, chain, prompt, opts) {
 }
 const EFFORT_PARAM = z.enum(["fast", "deep"]).optional().describe('Reasoning budget: "fast" = low thinking effort, quickest and cheapest (the default for most models); "deep" = high effort for hard analysis. Models without an effort map ignore it.');
 
-function costSummary(results, keys) {
+function costSummary(results, keys, elapsedMs) {
   const items = [];
   let totalCost = 0;
   let totalTokens = 0;
@@ -860,7 +870,8 @@ function costSummary(results, keys) {
   }
   const count = results.filter(r => r.status === "fulfilled").length;
   const costLine = items.length ? items.join(" + ") + ` = $${totalCost.toFixed(6)}` : "no cost data";
-  return `\n📊 ${count} models called | ${totalTokens} tokens | ${costLine}`;
+  const elapsed = Number.isFinite(elapsedMs) ? ` | ${(elapsedMs / 1000).toFixed(1)}s wall-clock` : "";
+  return `\n📊 ${count} models called | ${totalTokens} tokens${elapsed} | ${costLine}`;
 }
 
 // ── MCP Server ──
@@ -969,6 +980,7 @@ if (askAllKeys.length >= 2) {
     conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, effort, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "", effort: effort || "fast" };
+    const t0 = Date.now();
     const results = await Promise.allSettled(
       askAllKeys.map(k => callModel(k, prompt, opts))
     );
@@ -977,7 +989,7 @@ if (askAllKeys.length >= 2) {
         ? fmt(models[askAllKeys[i]].name, r.value)
         : `━━━ ${models[askAllKeys[i]].name} error ━━━\n${r.reason?.message}`
     );
-    parts.push(costSummary(results, askAllKeys));
+    parts.push(costSummary(results, askAllKeys, Date.now() - t0));
     return { content: [{ type: "text", text: parts.join("\n\n" + "═".repeat(50) + "\n\n") }] };
   });
 }
@@ -994,6 +1006,7 @@ if (chatModelKeys.length >= 2) {
     conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
   }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, model_a, model_b, system_prompt, effort, conversation_id }) => {
     const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "", effort };
+    const t0 = Date.now();
     const results = await Promise.allSettled([
       callModel(model_a, prompt, opts),
       callModel(model_b, prompt, opts),
@@ -1004,7 +1017,7 @@ if (chatModelKeys.length >= 2) {
     parts.push(results[0].status === "fulfilled" ? fmt(names[0], results[0].value) : `━━━ ${names[0]} error ━━━\n${results[0].reason?.message}`);
     parts.push("\n" + "═".repeat(50) + "\n");
     parts.push(results[1].status === "fulfilled" ? fmt(names[1], results[1].value) : `━━━ ${names[1]} error ━━━\n${results[1].reason?.message}`);
-    parts.push(costSummary(results, keys));
+    parts.push(costSummary(results, keys, Date.now() - t0));
     return { content: [{ type: "text", text: parts.join("\n") }] };
   });
 }

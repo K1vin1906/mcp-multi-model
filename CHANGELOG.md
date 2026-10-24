@@ -21,6 +21,8 @@ All notable changes to `mcp-multi-model` will be documented here.
 - routing:research 的 fallback_chain 改 `[openai-search, kimi, openai, deepseek]`,realtime 改 `[gemini, openai-search, openai, deepseek]`——联网类目先落到有联网的模型。
 - Server instructions 加第 (7) 条(effort 与截断标记);skill `multi-model` 1.1.0 新增「Effort」与「Nothing is cut silently」两节,成本/时长表按 fast 档更新。
 - `deepseek` 加 `thinking: true`(长文实测 1,367 个 reasoning token 后 finish=length);Gemini `deep` 档 `thinking_headroom: 8000`(deep 的 thoughts 实测 3-6k)。
+- 截断提示按预算去向分叉:reasoning / thinking 用了 0 token 时不再建议 `effort="fast"`(10-24 自测 Gemini 长文 7,996/8,000 全是正文,原提示误导),改为「raise max_tokens or narrow the ask; the answer itself outgrew it」;reasoning 数未知时只给通用提示。
+- `ask_all` / `ask_both` 的 📊 汇总行加总耗时 `| 21.3s wall-clock |`,验「整体一分钟内」不必再从单模型最大延迟推断。
 
 ### Measured(`eval/reliability.js`,2026-10-24,67 次调用共 $0.92,详见 eval/README.md)
 - 失败 0 / 静默截断 0;Gemini 联网 research 默认 fast 中位 21s(此前 ~55s 且 1500 预算下句中截断),deep 中位 102s(5.9-6.3k thoughts,完整);`ask_all` 9 模型全部两轮作答,中位 10s、p90 17s(K3 15-17s,此前 60s 必超时);Kimi realtime 5/5 无超时(10 月 60s 下 2/8 超时);openai-search fast 31-36s / deep 89s。
