@@ -174,7 +174,7 @@ Then add to your MCP config:
 
 ## Works with any MCP host
 
-The server speaks plain stdio MCP, so every host can run it. Two things differ between hosts: how long they let one tool call run, and whether they read the server's built-in instructions. Some calls here are slow by design (`ask_all` 1-2 min, `openai-pro-search` up to 3 min, `generate_video` several minutes), so check the timeout column. Checked against official docs in October 2026; items marked *(secondary)* come from community sources.
+The server speaks plain stdio MCP, so every host can run it. Two things differ between hosts: how long they let one tool call run, and whether they read the server's built-in instructions. Some calls here are slow by design (`ask_all` 10-20 s at the default fast effort but a minute or more at deep, `openai-pro-search` up to 3 min, `generate_video` several minutes), so check the timeout column. Checked against official docs in October 2026; items marked *(secondary)* come from community sources.
 
 | Host | Config | Default tool timeout | Reads server `instructions` |
 |------|--------|----------------------|-----------------------------|

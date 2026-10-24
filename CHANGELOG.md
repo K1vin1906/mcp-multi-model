@@ -2,7 +2,7 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
-## [Unreleased] - v3.12 "no silent truncation"
+## [3.12.0] - 2026-10-24 "no silent truncation"
 
 起因(2026-10-24 复盘 10 月 25 次真实调用):7 次失败 = 4 次 60s 超时 + 3 次 Kimi「reasoning 耗尽」空答,每次失败都要重调;另有 Gemini 回复在句中被截且无任何标记。根因:思考模型的 reasoning token 与 `max_tokens` 共用预算(Gemini 3.8 Flash 默认档一次 research 先烧 2,600-3,700 thoughts),而 server 只在正文几乎为空时才报警。
 
@@ -23,6 +23,7 @@ All notable changes to `mcp-multi-model` will be documented here.
 - `deepseek` 加 `thinking: true`(长文实测 1,367 个 reasoning token 后 finish=length);Gemini `deep` 档 `thinking_headroom: 8000`(deep 的 thoughts 实测 3-6k)。
 - 截断提示按预算去向分叉:reasoning / thinking 用了 0 token 时不再建议 `effort="fast"`(10-24 自测 Gemini 长文 7,996/8,000 全是正文,原提示误导),改为「raise max_tokens or narrow the ask; the answer itself outgrew it」;reasoning 数未知时只给通用提示。
 - `ask_all` / `ask_both` 的 📊 汇总行加总耗时 `| 21.3s wall-clock |`,验「整体一分钟内」不必再从单模型最大延迟推断。
+- `ask_all` 工具描述 / server instructions 第 (4) 条 / README 宿主超时节的「about 1-2 min」改为实测「about 10-20 s at fast effort, a minute or more at deep」(10-24 两轮 9 模型实测最慢 20.6s)。
 
 ### Measured(`eval/reliability.js`,2026-10-24,67 次调用共 $0.92,详见 eval/README.md)
 - 失败 0 / 静默截断 0;Gemini 联网 research 默认 fast 中位 21s(此前 ~55s 且 1500 预算下句中截断),deep 中位 102s(5.9-6.3k thoughts,完整);`ask_all` 9 模型全部两轮作答,中位 10s、p90 17s(K3 15-17s,此前 60s 必超时);Kimi realtime 5/5 无超时(10 月 60s 下 2/8 超时);openai-search fast 31-36s / deep 89s。

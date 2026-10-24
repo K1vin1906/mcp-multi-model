@@ -92,7 +92,7 @@ Models answering from training data will give confident, outdated facts. Today's
 
 ## What `ask_all` is and is not
 
-`ask_all` sends one prompt to every chat model and returns all answers. Use it to detect bias: everyone says X, one model says Y, so go check Y. It is not an evidence source. Inside `ask_all` only `gemini`, `gemini-pro`, and `kimi` have live web search; the rest answer from memory. It runs every model at `effort="fast"` (pass `effort="deep"` only when the comparison needs full reasoning), takes about a minute (each model is capped by its own timeout and reports its own failure inline) and costs about ten single calls. Do not use it for simple questions, and do not call it repeatedly in one task.
+`ask_all` sends one prompt to every chat model and returns all answers. Use it to detect bias: everyone says X, one model says Y, so go check Y. It is not an evidence source. Inside `ask_all` only `gemini`, `gemini-pro`, and `kimi` have live web search; the rest answer from memory. It runs every model at `effort="fast"` (pass `effort="deep"` only when the comparison needs full reasoning), takes about 10-20 s at `fast` and a minute or more at `deep` (each model is capped by its own timeout and reports its own failure inline) and costs about ten single calls. Do not use it for simple questions, and do not call it repeatedly in one task.
 
 ## Long calls and host timeouts
 
@@ -107,7 +107,7 @@ Some calls legitimately run for minutes. If a call fails with a timeout, do not 
 | Cline | 60 s | Network Timeout dropdown on the server card, set 5 min or more |
 | Cursor | not documented | keep calls short; avoid `ask_all` |
 
-Expected durations at `fast`: single cheap model 3-20 s; web-grounded `gemini` / `openai-search` 10-40 s; `kimi` 15-60 s. At `deep`: 2-5× that; `openai-pro-search` up to 180 s. `ask_all` about a minute; `generate_video` several minutes. Server-side timeouts are per model (60 s default, 120 s for web and thinking models, 180 s for `openai-pro-search`), so a host timeout below 180 s is the thing to raise.
+Expected durations at `fast`: single cheap model 3-20 s; web-grounded `gemini` / `openai-search` 10-40 s; `kimi` 15-60 s. At `deep`: 2-5× that; `openai-pro-search` up to 180 s. `ask_all` 10-20 s at `fast`, a minute or more at `deep`; `generate_video` several minutes. Server-side timeouts are per model (60 s default, 120 s for web and thinking models, 180 s for `openai-pro-search`), so a host timeout below 180 s is the thing to raise.
 
 ## Working with results
 
