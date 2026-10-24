@@ -2,6 +2,29 @@
 
 All notable changes to `mcp-multi-model` will be documented here.
 
+## [Unreleased] - v3.12 "no silent truncation"
+
+起因(2026-10-24 复盘 10 月 25 次真实调用):7 次失败 = 4 次 60s 超时 + 3 次 Kimi「reasoning 耗尽」空答,每次失败都要重调;另有 Gemini 回复在句中被截且无任何标记。根因:思考模型的 reasoning token 与 `max_tokens` 共用预算(Gemini 3.8 Flash 默认档一次 research 先烧 2,600-3,700 thoughts),而 server 只在正文几乎为空时才报警。
+
+### Added
+- **`effort` 参数**(`ask_<model>` / `ask_ai` / `delegate` / `ask_both` / `ask_all`):`fast`(默认,低推理预算,最快)/ `deep`(高推理预算)。按模型在 config 的 `effort` 表映射到各家旋钮:Gemini `thinking_level`、OpenAI Chat/Responses `reasoning_effort`、Kimi K3 `reasoning_effort`;`default_effort` 决定不传时的档位(日常入口 fast,`gemini-pro` / `openai-pro` / `openai-pro-search` / `kimi_k3` deep);`ask_all` 统一 fast。实测 Gemini 3.8 Flash 联网 research 55s → 18s。
+- **`thinking_headroom`**(defaults,默认 4000):思考模型(`reasoning: true` / `thinking: true` / 有 `effort` 表 / Gemini 3.x 文本模型)实际发送 `max_tokens + headroom`,正文保住调用方要的预算;<256 的小预算(check_health)不加。
+- **截断永不静默**:三个 adapter 统一——finish `length` / `MAX_TOKENS` / Responses `incomplete:max_output_tokens` 且有正文 → 末尾追加 `[⚠️ Output truncated: max_tokens reached (reasoning used N tokens) ...]`;正文为空 → 原 reasoning 耗尽诊断;SAFETY / content_filter 等其他非正常结束 → `[⚠️ Output stopped early: ...]`;Gemini 流没给 finishReason 也标。结果对象新增 `finish_reason` / `truncated` / `thinking_tokens` / `effort` / `max_tokens_sent`,stats 行显示 `(N thinking)` 与 `effort=`。
+- **流式 stall 看门狗**:headers 到达后,正文流若超过该模型 `timeout_ms` 没有新 chunk 即中止并报 `Stream stalled`,不再要么挂到宿主超时、要么静默返回半截(以前 headers 一到就 clearTimeout,正文无超时)。
+- **`delegate` / `research` 运行期 fallback**:主模型失败(超时 / 5xx / 流中断)→ 用该类目 `fallback_chain` 第一个可用模型再试一次,回复头部注明 `⚠️ X failed: ... → answered by Y (fallback)`;最多两次尝试;预算超限不重试。`ask_<model>` / `ask_ai` 是显式指定,不 fallback。
+- **`eval/reliability.js`**:可靠性验收(long 长文 / fast 默认档 / deep 升档 / headroom 回归 / fallback 合成 / askall / realtime / search / effort 参数接受度),导入 index.js 走真实 adapter;验收 = 静默截断 0 + 失败率 ≤ 5%。
+- config 新字段:`effort` / `default_effort` / `thinking` / `extra_body`(原样并入请求体)/ `reasoning_effort`(Chat Completions 也透传)。
+
+### Changed
+- 超时按模型实际:`kimi` / `kimi_k27_code` / `kimi_k3` / `deepseek-pro` / `openai-pro` / `openai-search` / `gemini-pro` 加 `timeout_ms: 120000`(全局仍 60s)。
+- `openai-pro-search` 固定 `reasoning_effort: high` 改为 effort 表(default deep,行为不变,fast 可省)。
+- routing:research 的 fallback_chain 改 `[openai-search, kimi, openai, deepseek]`,realtime 改 `[gemini, openai-search, openai, deepseek]`——联网类目先落到有联网的模型。
+- Server instructions 加第 (7) 条(effort 与截断标记);skill `multi-model` 1.1.0 新增「Effort」与「Nothing is cut silently」两节,成本/时长表按 fast 档更新。
+- `deepseek` 加 `thinking: true`(长文实测 1,367 个 reasoning token 后 finish=length);Gemini `deep` 档 `thinking_headroom: 8000`(deep 的 thoughts 实测 3-6k)。
+
+### Measured(`eval/reliability.js`,2026-10-24,67 次调用共 $0.92,详见 eval/README.md)
+- 失败 0 / 静默截断 0;Gemini 联网 research 默认 fast 中位 21s(此前 ~55s 且 1500 预算下句中截断),deep 中位 102s(5.9-6.3k thoughts,完整);`ask_all` 9 模型全部两轮作答,中位 10s、p90 17s(K3 15-17s,此前 60s 必超时);Kimi realtime 5/5 无超时(10 月 60s 下 2/8 超时);openai-search fast 31-36s / deep 89s。
+
 ## [3.11.1] - 2026-10-23
 
 ### Changed

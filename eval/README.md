@@ -37,6 +37,47 @@ Prompts, gold answers and rubrics live in `tasks.js` (`TASKSET_VERSION`); do not
 
 Blind protocol: after a run the runner writes `grading_sheet.md` with every research/creative response under a random `R-xxxx` id in shuffled order, and the mapping in `grading_key.json`. The grader writes `grades.json` without opening the key or `raw.jsonl`; `report` joins them.
 
+## reliability.js — no silent truncation, no unexplained errors
+
+A second, smaller harness for the v3.12 reliability work. It does not grade quality; it checks that every call either returns a complete answer, a clearly marked partial one, or an announced fallback.
+
+```bash
+node eval/reliability.js                                  # all suites, ~60 calls, ≈ $0.5-1, 5-15 min
+node eval/reliability.js --suites=effort,fallback         # cheap sanity subset (~16 calls, ~$0.1, 1 min)
+node eval/reliability.js --suites=fast --repeat=10        # latency sample for the default effort
+```
+
+| suite | what it sends | what must hold |
+|---|---|---|
+| `long` | a ~2000-word guide request at `max_tokens: 4000`, `fast`, to gemini / openai / deepseek / kimi, plus gemini at `deep` | not truncated, > 3000 chars, END marker present; `deep` shows thinking tokens |
+| `fast` | the web-grounded research prompt ×N on gemini, default effort | `effort=fast`, not truncated; latency is the number to watch |
+| `deep` | same prompt, `effort="deep"` | thinking tokens > 200, not truncated |
+| `headroom` | same prompt at `max_tokens: 1500` (the shape that used to come back cut mid-sentence) at both efforts | server sent 1500 + headroom; any cut is marked |
+| `fallback` | a synthetic model with a 1 ms timeout in front of the real chain; then two such models | fallback lands on the chain model with one recorded attempt; double failure throws naming both |
+| `askall` | the `ask_all` model set at `fast`, twice | no empty answers, no reasoning-exhausted diagnostics, no unmarked truncation |
+| `realtime` | a Chinese weather question to kimi ×N | no timeouts at the new 120 s, non-empty |
+| `search` | openai-search at `fast` ×2 and `deep` ×1 | sources present, effort honoured, not truncated |
+| `effort` | every model with an effort map, one short prompt at `fast` and `deep` | the provider accepts the mapped parameter (no 400) |
+
+Acceptance (exit code): **silent truncation = 0** (a non-STOP finish without a ⚠️ marker, or empty text without a diagnostic) and **errors after fallback ≤ 5 %**. Results land in `results/reliability-<ts>[-tag].json`.
+
+## Results — reliability runs `2026-10-24T08-37-00-v312-full` + `08-40-48-v312-rerun`
+
+Full run: 42 calls, **$0.64, PASS** — 0 errors, 0 silent truncations, 0 fallbacks needed. Two *marked* truncations in the `long` suite led to two config fixes (`deepseek` gets `thinking: true`, Gemini `deep` gets `thinking_headroom: 8000`); the rerun of `long` + `headroom` (9 calls, $0.16) is clean. Raw records: `results/reliability-2026-10-24T08-37-00-v312-full.json`, `results/reliability-2026-10-24T08-40-48-v312-rerun.json`.
+
+| suite | calls | median s | p90 s | what happened |
+|---|---:|---:|---:|---|
+| long (gemini / openai / deepseek / kimi at `fast`, gemini at `deep`; `max_tokens` 4000) | 5 | 52 | 75 | First run: DeepSeek V4 Flash stopped at `finish=length` after 1,367 reasoning tokens (it was not flagged as a thinking model, so no headroom) and Gemini `deep` hit 8000 with 3,494 thoughts; both came back **marked**. After the fixes all five complete (13-24k chars); Gemini `deep` once stopped on `RECITATION`, surfaced as `[⚠️ Output stopped early: RECITATION]`. |
+| fast (gemini research, default effort) | 5 | 21.3 | 23.1 | 6-7k chars each, 0 thinking tokens, `effort=fast`. The same prompt before v3.12: ~55 s and cut mid-sentence at 1500 tokens. |
+| deep (gemini research, `effort="deep"`) | 2 | 102 | 107 | 5.9-6.3k thinking tokens, complete. Depth costs 5× the time; that is what the switch is for. |
+| headroom (gemini, `max_tokens` 1500) | 4 | 56 | 103 | `fast`: complete at 5500 sent. `deep`: one MAX_TOKENS at 5500 (marked) before the 8000 override, complete at 9500 after. |
+| askall (the 9 `ask_all` models at `fast`, twice) | 18 | 10.2 | 16.8 | Every model answered both times, no empty answers. Kimi K3 15-17 s at `fast` (it used to time out at 60 s on `max`); Astra 9 s / $0.017. |
+| realtime (kimi, Chinese weather) | 5 | 13.4 | 14.5 | 0 timeouts (2 of 8 calls timed out in October at 60 s). |
+| search (openai-search) | 3 | 36 | 89 | `fast` 31-36 s, `deep` 89 s / $0.13; sources present, effort honoured. |
+| effort + fallback (smoke run `08-30-35`) | 16 | 3.2 | 7.4 | Every provider accepted both mapped levels (Luna, Astra, Responses, Gemini Flash/Pro, K3); synthetic 1 ms-timeout primary fell back to DeepSeek with one recorded attempt; double failure threw naming both models. |
+
+What these runs do not show: quality at `fast` vs `deep` (not graded), behaviour under provider outages (fallback was exercised synthetically), and Codex/Cline host timeouts (measured in-process, not through a host).
+
 ## Caveats (read before quoting a number)
 
 - **n = 4 per cell, 1 repetition.** Differences of one task (25 points) are noise-level; latency is a single sample per call and depends on the network (this is measured from a Mac in China through a proxy to US/CN endpoints).

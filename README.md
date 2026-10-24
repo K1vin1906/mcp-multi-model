@@ -125,6 +125,8 @@ Tools are dynamically generated from your config. With the default setup:
 | `research` | Deep research with web search |
 | `check_health` | Ping all models, report status and latency |
 
+Every chat tool also takes **`effort: "fast" | "deep"`**. `fast` (the default for the everyday entries) maps to low reasoning effort on each provider (Gemini `thinking_level`, OpenAI `reasoning_effort`, Kimi K3 `reasoning_effort`); `deep` turns the same knobs up for hard analysis. Flagship entries (`gemini-pro`, `openai-pro`, `openai-pro-search`, `kimi_k3`) default to `deep`; `ask_all` runs everything at `fast`.
+
 ## Installation
 
 ### Option 1: npx (recommended)
@@ -248,8 +250,9 @@ cp config.example.yaml config.yaml
 defaults:
   max_tokens: 4000
   temperature: 0.7
-  timeout_ms: 60000
+  timeout_ms: 60000        # per-model `timeout_ms` overrides this (web / thinking models ship with 120000)
   max_retries: 2
+  thinking_headroom: 4000  # added on top of max_tokens for thinking models, so reasoning tokens never eat the answer
   # cache_ttl_ms: 300000   # Cache identical prompts for 5 min
   # daily_budget_usd: 5.0  # Daily spending limit in USD
 
@@ -275,6 +278,11 @@ models:
     description: "Long context, broad knowledge, Google Search."
     features:
       - google_search
+    timeout_ms: 120000
+    effort:                       # per-level overrides of this model's own fields; callers pass effort="fast" | "deep"
+      fast: { thinking_level: low }
+      deep: { thinking_level: high }
+    default_effort: fast          # OpenAI-style models use { reasoning_effort: low | high }; any other field goes in extra_body
     pricing:
       input: 0.10
       output: 0.40
@@ -337,7 +345,10 @@ Mix local and cloud models freely — use `ask_all` to compare Ollama vs DeepSee
 
 ## Built-in Features
 
-- **Auto-retry & fallback** — Exponential backoff on 429/5xx, automatic fallback to backup model
+- **Auto-retry & fallback** — Exponential backoff on 429/5xx; `delegate` / `research` retry once with the category's `fallback_chain` when the routed model times out or errors, and say so in the reply
+- **No silent truncation** — a cut-off answer ends with `[⚠️ Output truncated ...]`, an all-reasoning answer comes back as a diagnostic, a stalled stream aborts after the model's timeout instead of returning half a reply
+- **Reasoning budget headroom** — thinking models get `thinking_headroom` extra output tokens so `max_tokens` means visible answer
+- **`effort` on every chat tool** — `fast` (default) or `deep`, mapped to each provider's own reasoning knob
 - **Conversation history** — Multi-turn context with `conversation_id` (30min expiry, up to 10 turns)
 - **Cost tracking** — Per-call token usage and cost estimation
 - **Response caching** — Cache identical prompts with configurable TTL

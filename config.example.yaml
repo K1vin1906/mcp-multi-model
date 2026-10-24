@@ -8,6 +8,10 @@ defaults:
   temperature: 0.7
   timeout_ms: 60000
   max_retries: 2
+  # Thinking models (reasoning: true / thinking: true / an `effort` map / any Gemini 3.x text model) spend part of max_tokens on
+  # reasoning tokens. The server adds this headroom on top of the caller's max_tokens so the visible answer keeps its budget.
+  # Tiny budgets (< 256, e.g. check_health pings) are sent unchanged.
+  thinking_headroom: 4000
 
 models:
   # === DeepSeek V4 ===
@@ -18,6 +22,7 @@ models:
     api_key_env: DEEPSEEK_API_KEY
     model: deepseek-v4-flash
     description: "DeepSeek V4 Flash. Default for code, math and Chinese; 1M context; very cheap."
+    thinking: true   # emits reasoning tokens too (1,367 on a long-form test, finish=length) → gets thinking_headroom
     pricing:
       input: 0.14    # $0.14/M cache miss
       output: 0.28   # $0.28/M
@@ -30,6 +35,8 @@ models:
     model: deepseek-v4-pro
     description: "DeepSeek V4 Pro with thinking mode. Hard reasoning in code or math; slower and pricier."
     force_non_streaming: true   # 思考模型流式 delta 只走 reasoning_content,易被 token 预算耗尽导致 content 为空;非流式 message.content 正常
+    thinking: true              # gets thinking_headroom (no reasoning: true here because DeepSeek does not lock temperature)
+    timeout_ms: 120000          # thinking mode often exceeds the global 60s
     pricing:
       input: 0.435   # $0.435/M cache miss
       output: 0.87   # $0.87/M
@@ -44,6 +51,12 @@ models:
     model: gpt-5.6-luna
     description: "GPT-5.6 Luna. Cheap OpenAI viewpoint for second opinions and bias checks. No web search."
     reasoning: true   # GPT-5.6 全系锁 temperature=1,本 flag 让 server 跳过自动设 temperature/top_p
+    # `effort` map: each level overrides this model's own fields; callers pick effort="fast" | "deep", otherwise default_effort.
+    # Chat Completions reasoning models take a top-level reasoning_effort.
+    effort:
+      fast: { reasoning_effort: low }
+      deep: { reasoning_effort: high }
+    default_effort: fast
     pricing:
       input: 0.20    # 2026-07-30 起 $0.20/M(原 $1)
       output: 1.20   # 2026-07-30 起 $1.20/M(原 $6)
@@ -56,6 +69,11 @@ models:
     model: gpt-6-astra
     description: "GPT-6 Astra, OpenAI flagship ($10/$50 per M tokens). Frontier reasoning, agentic coding, vision. No web search."
     reasoning: true   # GPT-6 Astra 锁 temperature=1(实测 400 "Only the default (1) value is supported");且必须 max_completion_tokens(index.js 正则已含 gpt-6)
+    effort:
+      fast: { reasoning_effort: low }
+      deep: { reasoning_effort: high }
+    default_effort: deep      # explicit flagship calls default to depth; ask_all passes fast
+    timeout_ms: 120000
     pricing:
       input: 10.00   # GPT-6 Astra $10/M(cached $1;>272K 输入 $20)。备注:GPT-5.6 Sol 现 $4/$20 促销至 2026-11-21,若嫌贵可切回 gpt-5.6-sol
       output: 50.00  # $50/M(>272K 输入时 $75)
@@ -76,6 +94,11 @@ models:
     features:
       - web_search
     search_context_size: medium
+    effort:
+      fast: { reasoning_effort: low }
+      deep: { reasoning_effort: high }
+    default_effort: fast
+    timeout_ms: 120000   # multi-round search + reasoning; 60s is tight
     ask_all: false
     pricing:
       input: 0.20
@@ -90,7 +113,10 @@ models:
     model: gpt-6-astra
     description: "GPT-6 Astra + web search, reasoning high. Deep evidence gathering for important decisions; up to 3 minutes and ~$0.3-1 per question."
     reasoning: true
-    reasoning_effort: high
+    effort:                   # was a fixed reasoning_effort: high; default_effort deep keeps that, fast saves time and money
+      fast: { reasoning_effort: low }
+      deep: { reasoning_effort: high }
+    default_effort: deep
     features:
       - web_search
     search_context_size: high
@@ -112,6 +138,13 @@ models:
     description: "Gemini 3.8 Flash with Google Search grounding. Default for research and creative writing; 1M context; cheap."
     features:
       - google_search
+    # Measured 2026-10-24: without thinking_level the default level burns 2,600-3,700 thought tokens per research call (~55s) and
+    # shares the maxOutputTokens budget with the answer, which then gets cut mid-sentence; low = 0 thoughts (~18s).
+    # Default fast=low; pass effort="deep" or call gemini-pro when the task needs real thinking.
+    effort:
+      fast: { thinking_level: low }
+      deep: { thinking_level: high, thinking_headroom: 8000 }   # deep thoughts measured at 3-6k tokens
+    default_effort: fast
     pricing:
       input: 0.75    # intro 价至 2026-12-31;2027-01-01 起 $1.50(届时重估是否切回更便宜档)
       output: 3.75   # intro 价;2027-01-01 起 $7.50。thinking token 计入 output
@@ -125,6 +158,11 @@ models:
     description: "Gemini 3.1 Pro with Google Search grounding. Deep research, long documents, careful analysis."
     features:
       - google_search
+    timeout_ms: 120000
+    effort:
+      fast: { thinking_level: low }
+      deep: { thinking_level: high, thinking_headroom: 8000 }   # deep thoughts measured at 3-6k tokens
+    default_effort: deep      # calling Pro explicitly means you want depth; ask_all passes fast
     pricing:
       input: 2.00
       output: 12.00
@@ -230,6 +268,7 @@ models:
     features:
       - web_search
     tool_loop_max: 5
+    timeout_ms: 120000   # reasoning + multi-round $web_search; 60s timed out 2 of 8 calls in Oct 2026
     pricing:
       input: 0.92    # ¥6.50/M cache miss ≈ $0.92 (cache hit ¥1.10/M ≈ $0.15)
       output: 3.80   # ¥27/M ≈ $3.80
@@ -248,6 +287,7 @@ models:
     model: kimi-k2.7-code
     description: "Kimi K2.7 Code. Agentic coding with image/video input and thinking mode; alternative to DeepSeek for code."
     reasoning: true   # K2.7 锁 temperature=1/top_p=0.95,本 flag 让 server 对 reasoning 模型跳过自动设这两个参数
+    timeout_ms: 120000
     pricing:
       input: 0.92    # ¥6.50/M cache miss ≈ $0.92 (cache hit ¥1.30/M ≈ $0.18)
       output: 3.80   # ¥27/M ≈ $3.80
@@ -266,19 +306,26 @@ models:
     description: "Kimi K3, Moonshot flagship with always-on thinking and image input. Hard reasoning and a Chinese flagship viewpoint; no web search; slow."
     reasoning: true          # 锁 temperature=1/top_p=0.95
     force_non_streaming: true  # 思考模型流式 delta.content 长期为空,非流式读 message.content
+    timeout_ms: 120000
+    effort:                    # top-level reasoning_effort low/high/max; ask_all passes fast → low (max is what used to time out at 60s)
+      fast: { reasoning_effort: low }
+      deep: { reasoning_effort: max }
+    default_effort: deep
     pricing:
       input: 2.82    # ¥20/M cache miss ≈ $2.82 (cache hit ¥2/M ≈ $0.28)
       output: 14.08  # ¥100/M ≈ $14.08
 
 # 委派路由配置
-# fallback_chain: 当 delegate_to 的 API key 缺失时,按顺序尝试备选 chat 模型;全缺则回落到顶层 fallback
+# fallback_chain: (1) when the delegate_to key is missing, the first configured model in the chain takes the route;
+#   (2) at run time, when the primary model fails (timeout, 5xx, stalled stream) delegate / research retry once with the first
+#   available chain model and say so in the reply header. Web-capable models come first for the web categories.
 routing:
   fallback: deepseek
   categories:
     research:
       keywords: [调研, 分析, 对比, 竞品, 方案, 综述, 梳理, survey, research, compare, analysis, "pros and cons", review]
       delegate_to: gemini
-      fallback_chain: [openai, deepseek, kimi]
+      fallback_chain: [openai-search, kimi, openai, deepseek]
       reason: "Gemini 3.8 Flash with Google Search grounding; enough for everyday research, call ask_gemini-pro for depth"
     code:
       keywords: [算法, 代码, 实现, 函数, 重构, 生成代码, 数学, 推导, 公式, algorithm, implement, code, math, function, refactor]
@@ -288,7 +335,7 @@ routing:
     realtime:
       keywords: [最新, 实时, 今天, 最近, 新闻, 热搜, 价格, 天气, 股价, 汇率, current, latest, today, news, price]
       delegate_to: kimi
-      fallback_chain: [gemini, openai, deepseek]
+      fallback_chain: [gemini, openai-search, openai, deepseek]
       reason: "Kimi K2.6 searches the Chinese web for real-time information"
     creative:
       keywords: [写作, 文案, 起名, 标题, slogan, 营销, 故事, creative, writing, copywriting, brainstorm]

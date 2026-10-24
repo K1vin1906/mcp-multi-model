@@ -44,6 +44,9 @@ const MAX_HISTORY_TURNS = defaults.max_history_turns || 10;
 const CONVERSATION_EXPIRY = 30 * 60 * 1000; // 30 minutes
 const CACHE_TTL = defaults.cache_ttl_ms || 0; // 0 = disabled
 const DAILY_BUDGET = defaults.daily_budget_usd ?? Infinity;
+// Thinking models spend part of the output budget on reasoning tokens (Gemini 3 thoughts, OpenAI reasoning, Kimi/DeepSeek
+// reasoning_content). The server adds this headroom on top of the caller's max_tokens so the visible answer keeps its budget.
+const THINKING_HEADROOM = defaults.thinking_headroom ?? 4000;
 
 // ── 对话历史管理 ──
 const conversations = new Map(); // id -> { [modelKey]: { messages: [], lastAccess } }
@@ -76,8 +79,8 @@ setInterval(() => {
 // ── Response cache ──
 const responseCache = new Map(); // cacheKey -> { result, expires }
 
-function makeCacheKey(modelKey, prompt, systemPrompt) {
-  return `${modelKey}\0${prompt}\0${systemPrompt || ""}`;
+function makeCacheKey(modelKey, prompt, systemPrompt, effort) {
+  return `${modelKey}\0${prompt}\0${systemPrompt || ""}\0${effort || ""}`;
 }
 
 // 定期清理过期缓存
@@ -213,10 +216,26 @@ async function* parseSSE(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const stall = response._stall;
+  let stallTimer = null;
+  const arm = () => {
+    if (!stall) return;
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => stall.controller.abort(), stall.limit);
+  };
+  arm();
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (e) {
+        if (e.name === "AbortError") throw new Error(`Stream stalled (no data for ${(stall?.limit || TIMEOUT) / 1000}s)`);
+        throw e;
+      }
+      const { done, value } = chunk;
       if (done) break;
+      arm();
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop();
@@ -229,6 +248,7 @@ async function* parseSSE(response) {
       }
     }
   } finally {
+    clearTimeout(stallTimer);
     reader.releaseLock();
   }
 }
@@ -245,6 +265,9 @@ async function fetchStream(url, options, { agent, timeoutMs } = {}) {
       const errType = res.status === 429 ? "rate_limit" : res.status >= 500 ? "server_error" : "api_error";
       throw new Error(`API error (${res.status}): ${errMsg}`);
     }
+    // Headers arrived. From here on the only timeout is a stall watchdog: parseSSE aborts if no chunk arrives for `limit` ms,
+    // so a half-open proxy connection surfaces as an error instead of a silent partial answer or a hang until the host gives up.
+    res._stall = { controller, limit };
     return res;
   } catch (e) {
     clearTimeout(timeout);
@@ -256,6 +279,22 @@ async function fetchStream(url, options, { agent, timeoutMs } = {}) {
 }
 
 const REASONING_EXHAUSTED_MSG = "⚠️ The model spent its whole max_tokens budget on reasoning and returned no answer text. Raise max_tokens or use a non-thinking model.";
+// A cut-off answer is never returned silently: the model stopped on its output budget but did produce text → append this.
+function truncationNote(detail) {
+  return `\n\n[⚠️ Output truncated: max_tokens reached${detail ? ` (${detail})` : ""}. Raise max_tokens, narrow the ask, or pass effort="fast" so less budget goes to reasoning.]`;
+}
+function stopNote(reason) {
+  return `\n\n[⚠️ Output stopped early: ${reason}]`;
+}
+// OpenAI-style finish reasons (OpenAI, DeepSeek, Kimi): "length" = budget exhausted, "content_filter" = cut by the provider.
+function finalizeOpenAIText(content, finish, reasoningTokens) {
+  if (finish === "length") {
+    if (!content.trim()) return REASONING_EXHAUSTED_MSG;
+    return content + truncationNote(reasoningTokens != null ? `reasoning used ${reasoningTokens} tokens` : "");
+  }
+  if (finish === "content_filter") return content + stopNote("content_filter");
+  return content;
+}
 
 // ── 适配器：OpenAI 兼容 ──
 async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history = [], extra = {}) {
@@ -313,6 +352,9 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
     reqBody.temperature = extra.temperature ?? modelCfg.temperature ?? DEFAULT_TEMP;
     if (extra.topP != null) reqBody.top_p = extra.topP;
   }
+  // Effort map / config passthrough: `reasoning_effort` (GPT-5.x, Kimi K3) and any raw `extra_body` fields (e.g. Kimi `thinking`).
+  if (modelCfg.reasoning_effort) reqBody.reasoning_effort = modelCfg.reasoning_effort;
+  if (modelCfg.extra_body && typeof modelCfg.extra_body === "object") Object.assign(reqBody, modelCfg.extra_body);
 
   const features = modelCfg.features || [];
   const hasToolLoop = features.includes("web_search");
@@ -348,8 +390,13 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
     }
     const usage = data.usage || {};
     const nsContent = choice?.message?.content || "";
+    const nsFinish = choice?.finish_reason || null;
+    const nsReasoning = usage.completion_tokens_details?.reasoning_tokens;
     return {
-      content: (!nsContent && choice?.finish_reason === "length") ? REASONING_EXHAUSTED_MSG : nsContent,
+      content: finalizeOpenAIText(nsContent, nsFinish, nsReasoning),
+      finish_reason: nsFinish,
+      truncated: nsFinish === "length",
+      thinking_tokens: nsReasoning,
       model: data.model || modelCfg.model,
       tokens: { prompt: usage.prompt_tokens || 0, completion: usage.completion_tokens || 0, total: usage.total_tokens || 0 },
     };
@@ -377,11 +424,13 @@ async function adapterOpenAI(modelCfg, prompt, systemPrompt, maxTokens, history 
     if (chunk.usage) usage = chunk.usage;
     if (chunk.model) model = chunk.model;
   }
-  // 思考模型(K2.7 Code / DeepSeek Pro 等)的 reasoning 可能吃满 max_tokens,正文为空 → 回显诊断而非空串
-  if (!content && finishReason === "length") content = REASONING_EXHAUSTED_MSG;
-
+  // 思考模型(K2.7 Code / DeepSeek Pro 等)的 reasoning 可能吃满 max_tokens:正文为空 → 诊断;正文被截 → 追加截断标记,绝不静默
+  const streamReasoning = usage.completion_tokens_details?.reasoning_tokens;
   return {
-    content,
+    content: finalizeOpenAIText(content, finishReason, streamReasoning),
+    finish_reason: finishReason,
+    truncated: finishReason === "length",
+    thinking_tokens: streamReasoning,
     model,
     tokens: { prompt: usage.prompt_tokens || 0, completion: usage.completion_tokens || 0, total: usage.total_tokens || 0 },
   };
@@ -491,15 +540,26 @@ async function adapterGemini(modelCfg, prompt, systemPrompt, maxTokens, history 
     if (chunk.candidates?.[0]?.finishReason) finishReason = chunk.candidates[0].finishReason;
     if (chunk.usageMetadata) usage = chunk.usageMetadata;
   }
-  // Gemini 3.x thinking token 计入 maxOutputTokens:小预算 + medium/high thinking 会 MAX_TOKENS 且正文为空/几个字
-  if (finishReason === "MAX_TOKENS" && content.trim().length < 20) {
-    content = REASONING_EXHAUSTED_MSG + (content.trim() ? `\n(partial text: ${content.trim()})` : "") + ` [thoughts=${usage.thoughtsTokenCount || 0} tokens]`;
+  // Gemini 3.x thinking tokens share maxOutputTokens: a small budget leaves the answer empty (→ diagnostic) or cut mid-sentence
+  // (→ truncation note). Other non-STOP reasons (SAFETY, RECITATION...) and a stream that ends without a finish reason are flagged too.
+  const thoughts = usage.thoughtsTokenCount || 0;
+  if (finishReason === "MAX_TOKENS") {
+    content = content.trim().length < 20
+      ? REASONING_EXHAUSTED_MSG + (content.trim() ? `\n(partial text: ${content.trim()})` : "") + ` [thoughts=${thoughts} tokens]`
+      : content + truncationNote(`thinking used ${thoughts} tokens`);
+  } else if (finishReason && finishReason !== "STOP") {
+    content += stopNote(finishReason);
+  } else if (!finishReason) {
+    content += stopNote("stream ended without a finish reason");
   }
 
   return {
     content,
+    finish_reason: finishReason,
+    truncated: finishReason === "MAX_TOKENS",
+    thinking_tokens: thoughts,
     model: modelCfg.model,
-    tokens: { prompt: usage.promptTokenCount || 0, completion: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0), total: usage.totalTokenCount || 0 },  // Gemini 3.x thinking token 按 output 计费,必须计入
+    tokens: { prompt: usage.promptTokenCount || 0, completion: (usage.candidatesTokenCount || 0) + thoughts, total: usage.totalTokenCount || 0 },  // Gemini 3.x thinking token 按 output 计费,必须计入
   };
 }
 
@@ -608,6 +668,7 @@ async function adapterOpenAIResponses(modelCfg, prompt, systemPrompt, maxTokens,
     if (extra.topP != null) body.top_p = extra.topP;
   }
   if (modelCfg.reasoning_effort) body.reasoning = { effort: modelCfg.reasoning_effort };
+  if (modelCfg.extra_body && typeof modelCfg.extra_body === "object") Object.assign(body, modelCfg.extra_body);
 
   const features = modelCfg.features || [];
   if (features.includes("web_search") && !extra.healthPing) {   // check_health 的 ping 不触发按次计费的搜索
@@ -648,13 +709,24 @@ async function adapterOpenAIResponses(modelCfg, prompt, systemPrompt, maxTokens,
       }
     }
   }
-  if (!content.trim() && data.status === "incomplete" && data.incomplete_details?.reason === "max_output_tokens") content = REASONING_EXHAUSTED_MSG;
+  const usage = data.usage || {};
+  const respReasoning = usage.output_tokens_details?.reasoning_tokens;
+  const respIncomplete = data.status === "incomplete" ? (data.incomplete_details?.reason || "incomplete") : null;
+  if (data.status === "failed") throw new Error(`API error: ${data.error?.message || "response failed"}`);
+  if (respIncomplete === "max_output_tokens") {
+    // max_output_tokens includes reasoning tokens: a reasoning model can burn the whole budget before (or while) writing the answer.
+    content = content.trim() ? content + truncationNote(respReasoning != null ? `reasoning used ${respReasoning} tokens` : "") : REASONING_EXHAUSTED_MSG;
+  } else if (respIncomplete) {
+    content += stopNote(respIncomplete);
+  }
   if (sources.size && !extra.healthPing) {
     content += "\n\nSources:\n" + [...sources].map(([u, t]) => `- ${t ? t + " — " : ""}${u}`).join("\n");
   }
-  const usage = data.usage || {};
   return {
     content,
+    finish_reason: respIncomplete ? `incomplete:${respIncomplete}` : (data.status || null),
+    truncated: respIncomplete === "max_output_tokens",
+    thinking_tokens: respReasoning,
     model: data.model || modelCfg.model,
     tokens: { prompt: usage.input_tokens || 0, completion: usage.output_tokens || 0, total: usage.total_tokens || 0 },   // output_tokens 已含 reasoning
     tool_calls: toolCalls,
@@ -664,17 +736,40 @@ async function adapterOpenAIResponses(modelCfg, prompt, systemPrompt, maxTokens,
 // ── 通用调用入口 ──
 const adapters = { openai: adapterOpenAI, gemini: adapterGemini, "openai-responses": adapterOpenAIResponses };
 
-async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false, imageConfig, temperature, topP } = {}) {
-  const cfg = models[key];
-  if (!cfg) throw new Error(`Model "${key}" is not configured or its API key is missing`);
-  const adapter = adapters[cfg.adapter];
-  if (!adapter) throw new Error(`Unknown adapter type: ${cfg.adapter}`);
+// ── Effort (fast / deep) ──
+// A model's `effort` map in config.yaml holds per-level overrides of its own fields (thinking_level, reasoning_effort, extra_body...).
+// `default_effort` picks the level when the caller passes none; models without a map ignore effort entirely.
+const EFFORT_LEVELS = ["fast", "deep"];
+function resolveEffort(cfg, requested) {
+  const map = cfg.effort && typeof cfg.effort === "object" ? cfg.effort : null;
+  if (!map) return { cfg, effort: null };
+  const level = requested || cfg.default_effort || "fast";
+  const frag = map[level];
+  return { cfg: frag && typeof frag === "object" ? { ...cfg, ...frag } : cfg, effort: level };
+}
+// Models whose output budget is shared with reasoning tokens (explicit flags, an effort map, or any Gemini 3.x text model).
+function isThinkingModel(cfg) {
+  return cfg.reasoning === true || cfg.thinking === true || !!cfg.effort
+    || (cfg.adapter === "gemini" && !cfg.image_generation && !cfg.video_generation);
+}
+
+async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_MAX_TOKENS, conversationId = "", _isFallback = false, _skipCache = false, imageConfig, temperature, topP, effort } = {}) {
+  const baseCfg = models[key];
+  if (!baseCfg) throw new Error(`Model "${key}" is not configured or its API key is missing`);
+  const adapter = adapters[baseCfg.adapter];
+  if (!adapter) throw new Error(`Unknown adapter type: ${baseCfg.adapter}`);
+  if (effort && !EFFORT_LEVELS.includes(effort)) throw new Error(`Unknown effort "${effort}" (use ${EFFORT_LEVELS.join(" / ")})`);
 
   // Budget check
   checkBudget();
 
+  const { cfg, effort: effortLevel } = resolveEffort(baseCfg, effort);
+  // Headroom for reasoning tokens (model / effort level may override the default); tiny budgets (health pings) are sent as-is.
+  const headroom = Number.isFinite(cfg.thinking_headroom) ? cfg.thinking_headroom : THINKING_HEADROOM;
+  const sendMax = (isThinkingModel(cfg) && maxTokens >= 256) ? maxTokens + headroom : maxTokens;
+
   // Cache lookup (skip for conversations and explicit bypass)
-  const ck = makeCacheKey(key, prompt, systemPrompt);
+  const ck = makeCacheKey(key, prompt, systemPrompt, effortLevel);
   if (CACHE_TTL > 0 && !conversationId && !_skipCache) {
     const cached = responseCache.get(ck);
     if (cached && Date.now() < cached.expires) {
@@ -685,8 +780,10 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
   const history = getHistory(conversationId, key);
   const t0 = Date.now();
   try {
-    const result = await adapter(cfg, prompt, systemPrompt, maxTokens, history, { imageConfig, temperature, topP });
+    const result = await adapter(cfg, prompt, systemPrompt, sendMax, history, { imageConfig, temperature, topP });
     result.duration_ms = Date.now() - t0;
+    if (effortLevel) result.effort = effortLevel;
+    result.max_tokens_sent = sendMax;
     // 图像模型 pricing.output 语义是 $/张(非 $/M token),按张计价;文本模型按 token
     result.cost_usd = (cfg.image_generation && result.images?.length)
       ? result.images.length * (cfg.pricing?.output || 0)
@@ -704,7 +801,7 @@ async function callModel(key, prompt, { systemPrompt = "", maxTokens = DEFAULT_M
     const duration = Date.now() - t0;
     // Fallback: if not already a fallback attempt and a fallback model is configured
     if (!_isFallback && cfg.fallbackTo && models[cfg.fallbackTo]) {
-      return callModel(cfg.fallbackTo, prompt, { systemPrompt, maxTokens, conversationId, _isFallback: true });
+      return callModel(cfg.fallbackTo, prompt, { systemPrompt, maxTokens, conversationId, _isFallback: true, effort });
     }
     throw e;
   }
@@ -721,8 +818,33 @@ function fmt(name, r) {
   const sec = (r.duration_ms / 1000).toFixed(1);
   const costStr = r.cost_usd > 0 ? ` | $${r.cost_usd.toFixed(6)}` : "";
   const searchStr = r.tool_calls ? ` | ${r.tool_calls} web search` : "";
-  return `━━━ ${name} (${r.model}) ━━━\n${r.content}\n[tokens: ${r.tokens.prompt} in → ${r.tokens.completion} out, total ${r.tokens.total} | ${sec}s${searchStr}${costStr}]`;
+  const effortStr = r.effort ? ` | effort=${r.effort}` : "";
+  const thinkStr = r.thinking_tokens ? ` (${r.thinking_tokens} thinking)` : "";
+  return `━━━ ${name} (${r.model}) ━━━\n${r.content}\n[tokens: ${r.tokens.prompt} in → ${r.tokens.completion} out${thinkStr}, total ${r.tokens.total} | ${sec}s${effortStr}${searchStr}${costStr}]`;
 }
+
+// ── Fallback for routed tools (delegate / research) ──
+// Primary model failed (timeout, 5xx, stalled stream...) → try the first available model of the category's fallback_chain.
+// Bounded to two attempts so a bad day costs at most two timeouts. Budget errors are not retried.
+async function callWithFallback(primaryKey, chain, prompt, opts) {
+  const attempts = [];
+  const seen = new Set();
+  for (const key of [primaryKey, ...(chain || [])]) {
+    if (!key || !models[key] || seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const r = await callModel(key, prompt, opts);
+      return { r, key, attempts };
+    } catch (e) {
+      attempts.push({ key, name: models[key].name, error: e.message });
+      if (/^Daily budget/.test(e.message) || attempts.length >= 2) break;
+    }
+  }
+  const err = new Error(attempts.map(a => `${a.name}: ${a.error}`).join(" | ") || `Model "${primaryKey}" is not configured`);
+  err.attempts = attempts;
+  throw err;
+}
+const EFFORT_PARAM = z.enum(["fast", "deep"]).optional().describe('Reasoning budget: "fast" = low thinking effort, quickest and cheapest (the default for most models); "deep" = high effort for hard analysis. Models without an effort map ignore it.');
 
 function costSummary(results, keys) {
   const items = [];
@@ -745,19 +867,21 @@ function costSummary(results, keys) {
 // Server instructions: sent in the MCP initialize response. Claude Code and Gemini CLI inject it into the model's context;
 // Codex CLI 0.163 does not (tested 2026-10-23), which is why the same rules also ship as skills/multi-model/SKILL.md.
 // Keep the first 512 characters self-contained; the full playbook lives in skills/multi-model/SKILL.md.
-const SERVER_INSTRUCTIONS = "mcp-multi-model lets you consult other AI models (OpenAI GPT, Google Gemini, DeepSeek, Kimi, plus image/video generators) so you are not limited to one provider's view. RULES: (1) `delegate` offloads routine side-work by category: research->gemini (Google Search), code->deepseek, realtime->kimi (Chinese web), creative->gemini. (2) `ask_all` asks ~9 models at once. It is for spotting bias (all say X, one says Y), NOT evidence: only gemini/gemini-pro/kimi search the web inside it. (3) For facts that matter, get two independent web-grounded answers (`ask_both` with openai-search + gemini-pro) and cross-check primary sources yourself. (4) Slow calls: ask_all about 1-2 min, openai-pro-search up to 3 min, generate_video several min. Raise your host's MCP tool timeout to 300 s or more. (5) Cost: cheap = deepseek, gemini, openai (GPT-5.6 Luna), kimi; premium = openai-pro (GPT-6 Astra), openai-pro-search (~$0.3-1 per question), deepseek-pro, gemini-pro. Call premium models only when the task needs them. (6) Image/video tools save files locally and return the path. The bundled `multi-model` skill has the full playbook.";
+const SERVER_INSTRUCTIONS = "mcp-multi-model lets you consult other AI models (OpenAI GPT, Google Gemini, DeepSeek, Kimi, plus image/video generators) so you are not limited to one provider's view. RULES: (1) `delegate` offloads routine side-work by category: research->gemini (Google Search), code->deepseek, realtime->kimi (Chinese web), creative->gemini. (2) `ask_all` asks ~9 models at once. It is for spotting bias (all say X, one says Y), NOT evidence: only gemini/gemini-pro/kimi search the web inside it. (3) For facts that matter, get two independent web-grounded answers (`ask_both` with openai-search + gemini-pro) and cross-check primary sources yourself. (4) Slow calls: ask_all about 1-2 min, openai-pro-search up to 3 min, generate_video several min. Raise your host's MCP tool timeout to 300 s or more. (5) Cost: cheap = deepseek, gemini, openai (GPT-5.6 Luna), kimi; premium = openai-pro (GPT-6 Astra), openai-pro-search (~$0.3-1 per question), deepseek-pro, gemini-pro. Call premium models only when the task needs them. (6) Image/video tools save files locally and return the path. (7) Every chat tool takes effort=\"fast\" (default: low reasoning, fastest) or \"deep\" (high reasoning for hard analysis); the server adds budget headroom for reasoning tokens and marks any cut-off answer with [⚠️ Output truncated ...] instead of returning it silently. The bundled `multi-model` skill has the full playbook.";
 const server = new McpServer({ name: "mcp-multi-model", version: PKG_VERSION }, { capabilities: { logging: {} }, instructions: SERVER_INSTRUCTIONS });
 
 // 动态注册每个模型的 ask_{key} 工具
 for (const [key, cfg] of Object.entries(models)) {
+  const isGen = cfg.image_generation || cfg.video_generation;
   server.tool(`ask_${key}`, cfg.description || `Send a prompt to ${cfg.name}.`, {
     prompt: z.string().describe("The prompt to send"),
     system_prompt: z.string().optional().describe("Optional system prompt"),
     max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("Max output tokens"),
+    ...(isGen ? {} : { effort: EFFORT_PARAM }),   // image/video models have no reasoning knob
     conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
-  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, max_tokens, conversation_id }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, max_tokens, effort, conversation_id }) => {
     try {
-      const r = await callModel(key, prompt, { systemPrompt: system_prompt || "", maxTokens: max_tokens, conversationId: conversation_id || "" });
+      const r = await callModel(key, prompt, { systemPrompt: system_prompt || "", maxTokens: max_tokens, conversationId: conversation_id || "", effort });
       const parts = [{ type: "text", text: fmt(cfg.name, r) }];
       if (r.images?.length) {
         for (const img of r.images) parts.push({ type: "image", data: img.data, mimeType: img.mimeType });
@@ -778,8 +902,9 @@ server.tool("ask_ai", `Unified entry point: send a prompt to any configured mode
   max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("Max output tokens"),
   temperature: z.number().min(0).max(2).optional().describe("Sampling temperature (0-2). Overrides model default for this call."),
   top_p: z.number().min(0).max(1).optional().describe("Top-p (nucleus sampling, 0-1). Overrides model default for this call."),
+  effort: EFFORT_PARAM,
   conversation_id: z.string().optional().describe("Conversation ID for multi-turn context"),
-}, { readOnlyHint: true, openWorldHint: true }, async ({ model, prompt, system_prompt, max_tokens, temperature, top_p, conversation_id }) => {
+}, { readOnlyHint: true, openWorldHint: true }, async ({ model, prompt, system_prompt, max_tokens, temperature, top_p, effort, conversation_id }) => {
   try {
     const r = await callModel(model, prompt, {
       systemPrompt: system_prompt || "",
@@ -787,6 +912,7 @@ server.tool("ask_ai", `Unified entry point: send a prompt to any configured mode
       conversationId: conversation_id || "",
       temperature,
       topP: top_p,
+      effort,
     });
     const cfg = models[model];
     const parts = [{ type: "text", text: fmt(cfg.name, r) }];
@@ -839,9 +965,10 @@ if (askAllKeys.length >= 2) {
   server.tool("ask_all", `Query all chat models in parallel and return every answer side by side. Use to detect bias or disagreement between models, not as evidence: only Gemini and Kimi search the web inside this call. Slow (about 1-2 min; each model is capped by its own timeout) and roughly the cost of ten single calls. Models: ${askAllKeys.map(k => models[k].name).join(", ")}.${genNote}`, {
     prompt: z.string().describe("The prompt sent to every model"),
     system_prompt: z.string().optional().describe("Shared system prompt"),
+    effort: EFFORT_PARAM.describe('Reasoning budget for every model; defaults to "fast" here so the flagship thinking models answer quickly and cheaply. Pass "deep" only when the comparison needs full reasoning.'),
     conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
-  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, conversation_id }) => {
-    const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, system_prompt, effort, conversation_id }) => {
+    const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "", effort: effort || "fast" };
     const results = await Promise.allSettled(
       askAllKeys.map(k => callModel(k, prompt, opts))
     );
@@ -863,9 +990,10 @@ if (chatModelKeys.length >= 2) {
     model_a: chatModelEnum.optional().default(chatModelKeys[0]).describe("First chat model"),
     model_b: chatModelEnum.optional().default(chatModelKeys[1]).describe("Second chat model"),
     system_prompt: z.string().optional().describe("Shared system prompt"),
+    effort: EFFORT_PARAM,
     conversation_id: z.string().optional().describe("Conversation ID; reuse the same ID to keep multi-turn context"),
-  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, model_a, model_b, system_prompt, conversation_id }) => {
-    const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "" };
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ prompt, model_a, model_b, system_prompt, effort, conversation_id }) => {
+    const opts = { systemPrompt: system_prompt || "", conversationId: conversation_id || "", effort };
     const results = await Promise.allSettled([
       callModel(model_a, prompt, opts),
       callModel(model_b, prompt, opts),
@@ -943,18 +1071,25 @@ if (routingCfg) {
     category: categoryEnum.describe(`Task category (${categoryNames.join(" / ")}); auto = keyword routing`),
     system_prompt: z.string().optional().describe("Extra system prompt"),
     max_tokens: z.number().optional().default(DEFAULT_MAX_TOKENS).describe("Max output tokens"),
+    effort: EFFORT_PARAM,
     conversation_id: z.string().optional().describe("Conversation ID"),
-  }, { readOnlyHint: true, openWorldHint: true }, async ({ task, category, system_prompt, max_tokens, conversation_id }) => {
+  }, { readOnlyHint: true, openWorldHint: true }, async ({ task, category, system_prompt, max_tokens, effort, conversation_id }) => {
     try {
       const route = routeTask(task, category === "auto" ? null : category);
       const opts = {
         systemPrompt: system_prompt || "",
         maxTokens: max_tokens,
         conversationId: conversation_id || "",
+        effort,
       };
-      const r = await callModel(route.model, task, opts);
+      // Primary model down or timing out → one fallback from the category's chain, announced in the header.
+      const chain = categories[route.category]?.fallback_chain || [];
+      const { r, key, attempts } = await callWithFallback(route.model, chain, task, opts);
       const header = `🎯 Routed: ${route.category} → ${models[route.model].name} (${route.reason})`;
-      return { content: [{ type: "text", text: `${header}\n\n${fmt(models[route.model].name, r)}` }] };
+      const fb = attempts.length
+        ? `\n⚠️ ${attempts.map(a => `${a.name} failed: ${a.error}`).join("; ")} → answered by ${models[key].name} (fallback)`
+        : "";
+      return { content: [{ type: "text", text: `${header}${fb}\n\n${fmt(models[key].name, r)}` }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Delegate error: ${e.message}` }], isError: true };
     }
@@ -991,8 +1126,14 @@ if (researchCfg && models[researchCfg.model]) {
     const depths = { brief: "200字以内", standard: "500字左右", deep: "1000字以上，含背景、现状、优劣、建议" };
     const sys = `你是资深技术研究员。深度:${depths[depth]}。语言:${language}。结构化输出。`;
     try {
-      const r = await callModel(researchCfg.model, topic, { systemPrompt: sys, maxTokens: depth === "deep" ? 8000 : DEFAULT_MAX_TOKENS });
-      return { content: [{ type: "text", text: `Research result:\n\n${r.content}\n\n[${models[researchCfg.model].name} · ${r.tokens.total} tokens · ${(r.duration_ms / 1000).toFixed(1)}s]` }] };
+      const chain = config.routing?.categories?.research?.fallback_chain || [];
+      const { r, key, attempts } = await callWithFallback(researchCfg.model, chain, topic, {
+        systemPrompt: sys,
+        maxTokens: depth === "deep" ? 8000 : DEFAULT_MAX_TOKENS,
+        effort: depth === "deep" ? "deep" : "fast",
+      });
+      const fb = attempts.length ? `⚠️ ${attempts.map(a => `${a.name} failed: ${a.error}`).join("; ")} → answered by ${models[key].name} (fallback)\n\n` : "";
+      return { content: [{ type: "text", text: `Research result:\n\n${fb}${r.content}\n\n[${models[key].name} · ${r.tokens.total} tokens · ${(r.duration_ms / 1000).toFixed(1)}s${r.effort ? ` · effort=${r.effort}` : ""}]` }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Research error: ${e.message}` }], isError: true };
     }
@@ -1152,4 +1293,4 @@ process.on("SIGINT", () => process.exit());
 process.on("SIGTERM", () => process.exit());
 
 // ── Library exports(仅 MCP_MULTI_MODEL_LIBRARY=1 时有意义,见 eval/run.js)──
-export { callModel, calcCost, models, chatModelKeys, resolvedCategoryModels, config, PKG_VERSION, TIMEOUT, DEFAULT_MAX_TOKENS };
+export { callModel, callWithFallback, resolveEffort, isThinkingModel, calcCost, models, chatModelKeys, resolvedCategoryModels, config, PKG_VERSION, TIMEOUT, DEFAULT_MAX_TOKENS, THINKING_HEADROOM };
